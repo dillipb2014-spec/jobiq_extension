@@ -6,29 +6,39 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "GET_ANALYSIS") {
     const tabId = sender.tab?.id;
 
+    // If called from popup, get the active tab id
+    const getTabId = (callback) => {
+      if (tabId) { callback(tabId); return; }
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        callback(tabs[0]?.id);
+      });
+    };
+
     chrome.storage.local.get(["resumeText", "geminiApiKey"], async (data) => {
       const resume = data.resumeText || "";
       const apiKey = data.geminiApiKey || "";
 
-      if (!resume) {
-        chrome.tabs.sendMessage(tabId, { type: "ANALYSIS_ERROR", error: "No resume uploaded. Please upload your resume first." });
-        return;
-      }
-      if (!apiKey) {
-        chrome.tabs.sendMessage(tabId, { type: "ANALYSIS_ERROR", error: "No API key set. Go to extension popup → Settings tab." });
-        return;
-      }
+      getTabId((tid) => {
+        if (!resume) {
+          if (tid) chrome.tabs.sendMessage(tid, { type: "ANALYSIS_ERROR", error: "No resume uploaded. Please upload your resume first." });
+          chrome.runtime.sendMessage({ type: "ANALYSIS_ERROR", error: "No resume uploaded." });
+          return;
+        }
+        if (!apiKey) {
+          if (tid) chrome.tabs.sendMessage(tid, { type: "ANALYSIS_ERROR", error: "No API key. Go to extension popup → ⚙️ Settings and save your Gemini API key." });
+          chrome.runtime.sendMessage({ type: "ANALYSIS_ERROR", error: "No API key set." });
+          return;
+        }
 
-      try {
         const prompt = `You are a career coach AI. Analyze this resume against the job description.
 
-Return ONLY valid JSON in this exact format:
+Return ONLY valid JSON:
 {
   "match": 75,
-  "missing_keywords": ["keyword1", "keyword2"],
-  "strong_keywords": ["keyword3", "keyword4"],
-  "suggestions": "2-3 sentence actionable advice",
-  "cover_letter": "3 paragraph personalized cover letter"
+  "missing_keywords": ["keyword1"],
+  "strong_keywords": ["keyword2"],
+  "suggestions": "2-3 sentence advice",
+  "cover_letter": "3 paragraph cover letter"
 }
 
 RESUME:
@@ -37,29 +47,25 @@ ${resume.slice(0, 1500)}
 JOB DESCRIPTION:
 ${msg.jd.slice(0, 1500)}`;
 
-        const res = await fetch(
+        fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
           }
-        );
-
-        const raw = await res.json();
-        const text = raw.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-        const clean = text.replace(/```json|```/g, "").trim();
-        const result = JSON.parse(clean);
-
-        // Save last analysis
-        chrome.storage.local.set({ lastAnalysis: result, lastJD: msg.jd });
-
-        // Send result directly to the tab that requested it
-        chrome.tabs.sendMessage(tabId, { type: "SHOW_RESULT", data: result });
-
-      } catch (e) {
-        chrome.tabs.sendMessage(tabId, { type: "ANALYSIS_ERROR", error: `AI analysis failed: ${e.message}` });
-      }
+        ).then(r => r.json()).then(raw => {
+          const text = raw.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+          const clean = text.replace(/```json|```/g, "").trim();
+          const result = JSON.parse(clean);
+          chrome.storage.local.set({ lastAnalysis: result, lastJD: msg.jd });
+          if (tid) chrome.tabs.sendMessage(tid, { type: "SHOW_RESULT", data: result });
+          chrome.runtime.sendMessage({ type: "SHOW_RESULT", data: result });
+        }).catch(e => {
+          if (tid) chrome.tabs.sendMessage(tid, { type: "ANALYSIS_ERROR", error: `AI failed: ${e.message}` });
+          chrome.runtime.sendMessage({ type: "ANALYSIS_ERROR", error: `AI failed: ${e.message}` });
+        });
+      });
     });
     return true;
   }
