@@ -1,10 +1,35 @@
 // ─── JobIQ AI — Content Script with Floating Panel ───────────────────────────
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-let lastUrl = "";
+let lastUrl = location.href;
 let currentJD = "";
 let currentTitle = "";
 let currentCompany = "";
+
+// ── Robust JD Detection ───────────────────────────────────────────────────────
+function getJobDescription() {
+  const selectors = [
+    ".jobs-description-content__text",
+    ".jobs-box__html-content",
+    "#job-details",
+    ".show-more-less-html__markup",
+    ".jobs-description__content"
+  ];
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el && el.innerText.length > 100) return el.innerText;
+  }
+  return null;
+}
+
+async function waitForJD() {
+  for (let i = 0; i < 10; i++) {
+    const jd = getJobDescription();
+    if (jd) return jd;
+    await sleep(1000);
+  }
+  return null;
+}
 
 // ── Inject floating panel ─────────────────────────────────────────────────────
 function injectJobIQPanel() {
@@ -75,6 +100,15 @@ function injectJobIQPanel() {
         border:1px solid #334155;
       ">Open a LinkedIn job to begin.</div>
 
+      <!-- Resume Upload -->
+      <label id="jobiq-resume-label" style="
+        display:block; font-size:10px; color:#818cf8; background:#1e293b;
+        border:1px dashed #4f46e5; border-radius:8px; padding:6px 10px;
+        margin-bottom:8px; cursor:pointer; text-align:center;
+      ">📄 Upload Resume (.txt)
+        <input type="file" id="jobiq-resume" accept=".txt" style="display:none">
+      </label>
+
       <!-- Buttons -->
       <div style="display:flex; gap:6px;">
         <button id="jobiq-analyze" style="
@@ -99,14 +133,32 @@ function injectJobIQPanel() {
     panel.remove();
   });
 
+  // Resume upload in panel
+  document.getElementById("jobiq-resume").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const text = await file.text();
+    chrome.storage.local.set({ resumeText: text });
+    setStatus("✅ Resume uploaded!", "#34d399");
+    document.getElementById("jobiq-resume-label").textContent = `✅ ${file.name}`;
+  });
+
   // Analyze button
-  document.getElementById("jobiq-analyze").addEventListener("click", () => {
-    if (!currentJD) {
-      setStatus("⚠️ No job detected. Click a job card first.", "#fbbf24");
+  document.getElementById("jobiq-analyze").addEventListener("click", async () => {
+    setStatus("⏳ Detecting job description...", "#94a3b8");
+    const jd = await waitForJD();
+    if (!jd) {
+      setStatus("❌ No job detected. Click a job and wait 2 seconds.", "#f87171");
       return;
     }
+    const { resumeText } = await chrome.storage.local.get("resumeText");
+    if (!resumeText) {
+      setStatus("⚠️ Please upload your resume first.", "#fbbf24");
+      return;
+    }
+    currentJD = jd;
     setStatus("🧠 Analyzing with AI...", "#94a3b8");
-    chrome.runtime.sendMessage({ type: "GET_ANALYSIS", jd: currentJD });
+    chrome.runtime.sendMessage({ type: "GET_ANALYSIS", jd });
   });
 
   // Apply button
@@ -342,16 +394,15 @@ function fillFormFields(modal) {
   });
 }
 
-// ── SPA handling — reinject panel on URL change ───────────────────────────────
-const observer = new MutationObserver(() => {
+// ── SPA handling — poll for URL change every 1 second ────────────────────────
+setInterval(() => {
   if (location.href !== lastUrl) {
     lastUrl = location.href;
     if (location.href.includes("/jobs/")) {
-      setTimeout(() => { injectJobIQPanel(); extractAndSendJD(); }, 3000);
+      setTimeout(() => { injectJobIQPanel(); extractAndSendJD(); }, 2000);
     }
   }
-});
-observer.observe(document.body, { childList: true, subtree: true });
+}, 1000);
 
 // ── Initial load ──────────────────────────────────────────────────────────────
 window.addEventListener("load", () => {
