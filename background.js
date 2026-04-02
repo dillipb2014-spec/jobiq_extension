@@ -4,16 +4,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // ── Mode 1: Smart Match Analysis ──────────────────────────────────────────
   if (msg.type === "GET_ANALYSIS") {
+    const tabId = sender.tab?.id;
+
     chrome.storage.local.get(["resumeText", "geminiApiKey"], async (data) => {
       const resume = data.resumeText || "";
       const apiKey = data.geminiApiKey || "";
 
       if (!resume) {
-        chrome.runtime.sendMessage({ type: "ANALYSIS_ERROR", error: "No resume uploaded. Please upload your resume first." });
+        chrome.tabs.sendMessage(tabId, { type: "ANALYSIS_ERROR", error: "No resume uploaded. Please upload your resume first." });
         return;
       }
       if (!apiKey) {
-        chrome.runtime.sendMessage({ type: "ANALYSIS_ERROR", error: "No API key set. Please add your Gemini API key in settings." });
+        chrome.tabs.sendMessage(tabId, { type: "ANALYSIS_ERROR", error: "No API key set. Go to extension popup → Settings tab." });
         return;
       }
 
@@ -51,10 +53,12 @@ ${msg.jd.slice(0, 1500)}`;
 
         // Save last analysis
         chrome.storage.local.set({ lastAnalysis: result, lastJD: msg.jd });
-        chrome.runtime.sendMessage({ type: "SHOW_RESULT", data: result });
+
+        // Send result directly to the tab that requested it
+        chrome.tabs.sendMessage(tabId, { type: "SHOW_RESULT", data: result });
 
       } catch (e) {
-        chrome.runtime.sendMessage({ type: "ANALYSIS_ERROR", error: "AI analysis failed. Check your API key." });
+        chrome.tabs.sendMessage(tabId, { type: "ANALYSIS_ERROR", error: `AI analysis failed: ${e.message}` });
       }
     });
     return true;
