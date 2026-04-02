@@ -360,8 +360,13 @@ function getModalBtn(modal, keywords) {
 }
 
 function fillFormFields(modal) {
+  const DEFAULT_PROFILE = {
+    phone: "7750978982", name: "Dillip Kumar Behera",
+    email: "dillipb2014@gmail.com", experience: "4",
+    currentSalary: "900000", expectedSalary: "1200000", noticePeriod: "30"
+  };
   chrome.storage.local.get(["candidateProfile"], (data) => {
-    const p = data.candidateProfile || {};
+    const p = Object.assign({}, DEFAULT_PROFILE, data.candidateProfile || {});
     const fieldMap = {
       "phone": p.phone || "", "mobile": p.phone || "",
       "city": "Bangalore", "location": "Bangalore",

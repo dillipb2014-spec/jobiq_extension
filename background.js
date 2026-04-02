@@ -1,5 +1,37 @@
 // ─── JobIQ AI — Background Service Worker ───────────────────────────────────
 
+// Default config — pre-loaded on first install
+const DEFAULTS = {
+  geminiApiKey: "AIzaSyC8n0AmvdVjZ7N0PNlVDY1f0SJV9WLyog8",
+  minMatch: 50,
+  candidateProfile: {
+    name: "Dillip Kumar Behera",
+    email: "dillipb2014@gmail.com",
+    phone: "7750978982",
+    experience: "4",
+    currentSalary: "900000",
+    expectedSalary: "1200000",
+    noticePeriod: "30",
+  },
+  resumeText: `Dillip Kumar Behera | Talent Acquisition | People Operations Specialist
+Location: Bangalore, India
+SUMMARY: 4.6 years experience in end-to-end recruitment across Engineering, Design, InfoSec, Finance.
+SKILLS: Power BI, ATS, Boolean Search, Stakeholder Management, Offer Negotiation, Campus Hiring, BGV, Compliance, Workflow Automation, Recruitment Analytics.
+EXPERIENCE:
+- JUSPAY: Talent Acquisition & HR Operations Specialist (Jan 2024-Present). Full-cycle hiring, Power BI dashboards, AI sourcing tools.
+- INFOSYS: Senior HR Process Executive (Jun 2022-Dec 2023). Recruitment operations, analytics reports, onboarding compliance.
+- TECH MAHINDRA: Process Executive (Aug 2021-Jun 2022). HR operations, interview scheduling, ATS management.
+EDUCATION: MBA in HRM (2023-2025) | B.Tech (2019)`
+};
+
+// Load defaults on install
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.get(["geminiApiKey"], (r) => {
+    if (!r.geminiApiKey) {
+      chrome.storage.local.set(DEFAULTS);
+    }
+  });
+});
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // ── Mode 1: Smart Match Analysis ──────────────────────────────────────────
@@ -15,8 +47,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     };
 
     chrome.storage.local.get(["resumeText", "geminiApiKey"], async (data) => {
-      const resume = data.resumeText || "";
-      const apiKey = data.geminiApiKey || "";
+      const resume = data.resumeText || DEFAULTS.resumeText;
+      const apiKey = data.geminiApiKey || DEFAULTS.geminiApiKey;
 
       getTabId((tid) => {
         if (!resume) {
