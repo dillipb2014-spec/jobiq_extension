@@ -6,6 +6,45 @@ function isExtensionAlive() {
   return !!chrome.runtime?.id;
 }
 
+// Safe JSON extractor - handles Gemini wrapping text around JSON
+function extractJSON(text) {
+  try {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}") + 1;
+    if (start === -1 || end === 0) throw new Error("No JSON found");
+    return JSON.parse(text.slice(start, end));
+  } catch (e) {
+    console.error("[JobIQ] JSON parse failed:", text);
+    return null;
+  }
+}
+
+// Extract text from PDF using PDF.js
+async function extractTextFromPDF(file) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = chrome.runtime.getURL("pdf.min.js");
+    script.onload = async () => {
+      try {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdf.worker.min.js");
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let text = "";
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          text += content.items.map(item => item.str).join(" ") + "\n";
+        }
+        resolve(text.trim());
+      } catch (e) {
+        reject(e);
+      }
+    };
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+}
+
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let lastUrl = location.href;
 let currentJD = "";
@@ -107,8 +146,8 @@ function injectJobIQPanel() {
 
       <!-- Resume Upload -->
       <label id="jobiq-resume-label" style="display:block;font-size:10px;color:#818cf8;background:#1e293b;border:1px dashed #4f46e5;border-radius:8px;padding:6px 10px;margin-bottom:8px;cursor:pointer;text-align:center;">
-        &#x1F4C4; Upload Resume (.txt)
-        <input type="file" id="jobiq-resume" accept=".txt" style="display:none">
+        &#x1F4C4; Upload Resume (PDF or TXT)
+        <input type="file" id="jobiq-resume" accept=".pdf,.txt" style="display:none">
       </label>
 
       <!-- Buttons -->
@@ -131,10 +170,20 @@ function injectJobIQPanel() {
   document.getElementById("jobiq-resume").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const text = await file.text();
-    chrome.storage.local.set({ resumeText: text });
-    setStatus("Resume uploaded!", "#34d399");
-    document.getElementById("jobiq-resume-label").textContent = "Resume: " + file.name;
+    setStatus("Reading resume...", "#94a3b8");
+    try {
+      let text = "";
+      if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+        text = await extractTextFromPDF(file);
+      } else {
+        text = await file.text();
+      }
+      chrome.storage.local.set({ resumeText: text.slice(0, 8000) });
+      setStatus("Resume uploaded: " + file.name, "#34d399");
+      document.getElementById("jobiq-resume-label").textContent = "Resume: " + file.name;
+    } catch (e) {
+      setStatus("Failed to read resume: " + e.message, "#f87171");
+    }
   });
 
   document.getElementById("jobiq-analyze").addEventListener("click", async () => {
@@ -159,12 +208,15 @@ function injectJobIQPanel() {
       const apiKey = stored.geminiApiKey || "AIzaSyC8n0AmvdVjZ7N0PNlVDY1f0SJV9WLyog8";
       const resume = stored.resumeText || "Dillip Kumar Behera | Talent Acquisition | 4.6 years | Power BI, ATS, Boolean Search, Stakeholder Management, Recruitment Analytics | Juspay, Infosys, Tech Mahindra";
 
-      const prompt = `You are an ATS expert. Analyze resume vs job description.
-Return ONLY valid JSON:
-{"match":75,"missing_keywords":["kw1"],"strong_keywords":["kw2"],"improve_suggestions":["Add kw1 to skills"],"suggestions":"advice here","cover_letter":"para1\n\npara2\n\npara3"}
+      const prompt = `You are an ATS resume analyzer. Compare resume vs job description.
+Return ONLY valid JSON, no extra text, no explanation:
+{"match":72,"strong_keywords":["kw1","kw2"],"missing_keywords":["kw3","kw4"],"improve_suggestions":["Add kw3 to skills section","Mention kw4 in experience"],"suggestions":"2-3 sentence actionable advice","cover_letter":"Para1\n\nPara2\n\nPara3"}
 
-RESUME: ${resume.slice(0, 1500)}
-JOB: ${jd.slice(0, 1500)}`;
+RESUME:
+${resume.slice(0, 3000)}
+
+JOB DESCRIPTION:
+${jd.slice(0, 2000)}`;
 
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
@@ -176,10 +228,18 @@ JOB: ${jd.slice(0, 1500)}`;
       );
       const raw = await res.json();
       const text = raw.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-      const clean = text.replace(/```json|```/g, "").trim();
-      let result;
-      try { result = JSON.parse(clean); }
-      catch (e) { result = { match: 0, missing_keywords: [], strong_keywords: [], improve_suggestions: [], suggestions: clean, cover_letter: "" }; }
+      console.log("[JobIQ] Raw AI response:", text);
+
+      // Use extractJSON to handle Gemini wrapping text around JSON
+      let result = extractJSON(text);
+      if (!result) {
+        result = { match: 0, missing_keywords: [], strong_keywords: [], improve_suggestions: ["Could not parse AI response. Try again."], suggestions: text.slice(0, 200), cover_letter: "" };
+      }
+
+      // Ensure match is a number
+      result.match = Number(result.match) || 0;
+      console.log("[JobIQ] Match score:", result.match);
+      console.log("[JobIQ] Parsed result:", result);
 
       chrome.storage.local.set({ lastAnalysis: result });
       showResultInPanel(result);
