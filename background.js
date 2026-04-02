@@ -51,16 +51,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const apiKey = data.geminiApiKey || DEFAULTS.geminiApiKey;
 
       getTabId((tid) => {
-        if (!resume) {
-          if (tid) chrome.tabs.sendMessage(tid, { type: "ANALYSIS_ERROR", error: "No resume uploaded. Please upload your resume first." });
-          chrome.runtime.sendMessage({ type: "ANALYSIS_ERROR", error: "No resume uploaded." });
-          return;
-        }
-        if (!apiKey) {
-          if (tid) chrome.tabs.sendMessage(tid, { type: "ANALYSIS_ERROR", error: "No API key. Go to extension popup → ⚙️ Settings and save your Gemini API key." });
-          chrome.runtime.sendMessage({ type: "ANALYSIS_ERROR", error: "No API key set." });
-          return;
-        }
+        const finalApiKey = data.geminiApiKey || DEFAULTS.geminiApiKey;
+        const finalResume = data.resumeText || DEFAULTS.resumeText;
+
+        // Logging
+        console.log("[JobIQ] JD Length:", msg.jd?.length);
+        console.log("[JobIQ] Using API Key:", !!finalApiKey);
+        console.log("[JobIQ] Resume Length:", finalResume.length);
 
         const prompt = `You are a career coach AI. Analyze this resume against the job description.
 
@@ -74,13 +71,13 @@ Return ONLY valid JSON:
 }
 
 RESUME:
-${resume.slice(0, 1500)}
+${finalResume.slice(0, 1500)}
 
 JOB DESCRIPTION:
 ${msg.jd.slice(0, 1500)}`;
 
         fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${finalApiKey}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -89,11 +86,28 @@ ${msg.jd.slice(0, 1500)}`;
         ).then(r => r.json()).then(raw => {
           const text = raw.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
           const clean = text.replace(/```json|```/g, "").trim();
-          const result = JSON.parse(clean);
-          chrome.storage.local.set({ lastAnalysis: result, lastJD: msg.jd });
-          if (tid) chrome.tabs.sendMessage(tid, { type: "SHOW_RESULT", data: result });
-          chrome.runtime.sendMessage({ type: "SHOW_RESULT", data: result });
+
+          // Safe JSON parse with fallback
+          let parsed;
+          try {
+            parsed = JSON.parse(clean);
+          } catch (e) {
+            console.error("[JobIQ] Invalid JSON from Gemini:", clean);
+            parsed = {
+              match: 0,
+              missing_keywords: [],
+              strong_keywords: [],
+              suggestions: clean,
+              cover_letter: ""
+            };
+          }
+
+          console.log("[JobIQ] Result:", parsed);
+          chrome.storage.local.set({ lastAnalysis: parsed, lastJD: msg.jd });
+          if (tid) chrome.tabs.sendMessage(tid, { type: "SHOW_RESULT", data: parsed });
+          chrome.runtime.sendMessage({ type: "SHOW_RESULT", data: parsed });
         }).catch(e => {
+          console.error("[JobIQ] Fetch error:", e.message);
           if (tid) chrome.tabs.sendMessage(tid, { type: "ANALYSIS_ERROR", error: `AI failed: ${e.message}` });
           chrome.runtime.sendMessage({ type: "ANALYSIS_ERROR", error: `AI failed: ${e.message}` });
         });
