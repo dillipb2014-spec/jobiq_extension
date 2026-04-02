@@ -1,4 +1,7 @@
-// ─── JobIQ AI — Background Service Worker ───────────────────────────────────
+// JobIQ AI - Background Service Worker
+importScripts("pdf.min.js");
+importScripts("mammoth.min.js");
+console.log("[JobIQ] Background loaded");
 
 // Default config — pre-loaded on first install
 const DEFAULTS = {
@@ -24,7 +27,24 @@ EXPERIENCE:
 EDUCATION: MBA in HRM (2023-2025) | B.Tech (2019)`
 };
 
-// Load defaults on install
+// ── PDF extraction (runs in service worker via importScripts) ───────────────
+async function extractTextFromPDF(arrayBuffer) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdf.worker.min.js");
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let text = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(x => x.str).join(" ") + "\n";
+  }
+  return text.trim();
+}
+
+async function extractTextFromDOCX(arrayBuffer) {
+  const result = await mammoth.extractRawText({ arrayBuffer });
+  return result.value.trim();
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.get(["geminiApiKey"], (r) => {
     if (!r.geminiApiKey) {
@@ -33,6 +53,26 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+
+  // ── Resume parsing ───────────────────────────────────────────────────────
+  if (msg.type === "PARSE_RESUME") {
+    (async () => {
+      try {
+        const buffer = new Uint8Array(msg.buffer).buffer;
+        let text = "";
+        if (msg.fileType === "pdf") {
+          text = await extractTextFromPDF(buffer);
+        } else if (msg.fileType === "docx" || msg.fileType === "doc") {
+          text = await extractTextFromDOCX(buffer);
+        }
+        sendResponse({ success: true, text: text.slice(0, 8000) });
+      } catch (e) {
+        console.error("[JobIQ] Parse error:", e);
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
+    return true;
+  }
 
   // ── Mode 1: Smart Match Analysis ──────────────────────────────────────────
   if (msg.type === "GET_ANALYSIS") {

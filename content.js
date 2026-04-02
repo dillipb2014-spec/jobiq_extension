@@ -22,45 +22,27 @@ function extractJSON(text) {
   }
 }
 
-// ── Resume text extraction — supports PDF, DOCX, DOC, TXT, RTF ─────────────
-async function loadScriptInContext(url) {
-  const res = await fetch(url);
-  const code = await res.text();
-  new Function(code)();
-}
 
-async function extractTextFromPDF(file) {
-  if (typeof pdfjsLib === "undefined") await loadScriptInContext(chrome.runtime.getURL("pdf.min.js"));
-  pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdf.worker.min.js");
-  const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-  let text = "";
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    text += content.items.map(x => x.str).join(" ") + "\n";
-  }
-  return text.trim();
-}
-
-async function extractTextFromDOCX(file) {
-  if (typeof mammoth === "undefined") await loadScriptInContext(chrome.runtime.getURL("mammoth.min.js"));
-  const buf = await file.arrayBuffer();
-  const result = await mammoth.extractRawText({ arrayBuffer: buf });
-  return result.value.trim();
-}
-
+// ── Resume text extraction — sends to background.js for parsing ──────────────
 async function extractResumeText(file) {
   const name = file.name.toLowerCase();
-  if (name.endsWith(".pdf")) return await extractTextFromPDF(file);
-  if (name.endsWith(".docx")) return await extractTextFromDOCX(file);
-  if (name.endsWith(".doc")) {
-    // DOC fallback — read as text (older binary format, best effort)
-    try { return await extractTextFromDOCX(file); }
-    catch { return await file.text(); }
+  // TXT and RTF — read directly in content script
+  if (name.endsWith(".txt") || name.endsWith(".rtf")) {
+    return await file.text();
   }
-  // TXT, RTF, any other text format
-  return await file.text();
+  // PDF, DOCX, DOC — send to background service worker
+  const fileType = name.endsWith(".pdf") ? "pdf" : name.endsWith(".docx") ? "docx" : "doc";
+  const buffer = await file.arrayBuffer();
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { type: "PARSE_RESUME", buffer: Array.from(new Uint8Array(buffer)), fileType },
+      (res) => {
+        if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
+        if (res && res.success) resolve(res.text);
+        else reject(new Error(res?.error || "Parse failed"));
+      }
+    );
+  });
 }
 
 // ── Get full JD including About the Job section ───────────────────────────────
