@@ -22,28 +22,48 @@ function extractJSON(text) {
   }
 }
 
-// ── PDF text extraction ───────────────────────────────────────────────────────
-async function extractTextFromPDF(file) {
+// ── Resume text extraction — supports PDF, DOCX, DOC, TXT, RTF ─────────────
+async function loadScript(src) {
   return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = chrome.runtime.getURL("pdf.min.js");
-    script.onload = async () => {
-      try {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdf.worker.min.js");
-        const buf = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-        let text = "";
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const content = await page.getTextContent();
-          text += content.items.map(x => x.str).join(" ") + "\n";
-        }
-        resolve(text.trim());
-      } catch (e) { reject(e); }
-    };
-    script.onerror = reject;
-    document.head.appendChild(script);
+    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+    const s = document.createElement("script");
+    s.src = src; s.onload = resolve; s.onerror = reject;
+    document.head.appendChild(s);
   });
+}
+
+async function extractTextFromPDF(file) {
+  await loadScript(chrome.runtime.getURL("pdf.min.js"));
+  pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdf.worker.min.js");
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  let text = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(x => x.str).join(" ") + "\n";
+  }
+  return text.trim();
+}
+
+async function extractTextFromDOCX(file) {
+  await loadScript(chrome.runtime.getURL("mammoth.min.js"));
+  const buf = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({ arrayBuffer: buf });
+  return result.value.trim();
+}
+
+async function extractResumeText(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".pdf")) return await extractTextFromPDF(file);
+  if (name.endsWith(".docx")) return await extractTextFromDOCX(file);
+  if (name.endsWith(".doc")) {
+    // DOC fallback — read as text (older binary format, best effort)
+    try { return await extractTextFromDOCX(file); }
+    catch { return await file.text(); }
+  }
+  // TXT, RTF, any other text format
+  return await file.text();
 }
 
 // ── Get full JD including About the Job section ───────────────────────────────
@@ -143,8 +163,8 @@ function injectJobIQPanel() {
 
       <!-- Resume Upload -->
       <label id="jobiq-resume-label" style="display:block;font-size:10px;color:#818cf8;background:#1e293b;border:1px dashed #4f46e5;border-radius:8px;padding:7px 10px;margin-bottom:8px;cursor:pointer;text-align:center;">
-        &#x1F4C4; Upload Resume (PDF or TXT)
-        <input type="file" id="jobiq-resume" accept=".pdf,.txt" style="display:none">
+        &#x1F4C4; Upload Resume (PDF, DOCX, DOC, TXT)
+        <input type="file" id="jobiq-resume" accept=".pdf,.docx,.doc,.txt,.rtf" style="display:none">
       </label>
 
       <!-- Buttons -->
@@ -170,17 +190,18 @@ function injectJobIQPanel() {
     if (!file) return;
     setStatus("Reading resume...", "#94a3b8");
     try {
-      let text = "";
-      if (file.name.endsWith(".pdf")) {
-        text = await extractTextFromPDF(file);
-      } else {
-        text = await file.text();
+      const text = await extractResumeText(file);
+      if (!text || text.length < 50) {
+        setStatus("Resume appears empty. Try a different format.", "#f87171");
+        return;
       }
       chrome.storage.local.set({ resumeText: text.slice(0, 8000) });
-      setStatus("Resume ready: " + file.name, "#34d399");
-      document.getElementById("jobiq-resume-label").textContent = "&#x2705; " + file.name;
+      setStatus("Resume ready: " + file.name + " (" + text.length + " chars)", "#34d399");
+      document.getElementById("jobiq-resume-label").textContent = "\u2705 " + file.name;
+      console.log("[JobIQ] Resume extracted:", text.slice(0, 200));
     } catch (err) {
       setStatus("Resume read failed: " + err.message, "#f87171");
+      console.error("[JobIQ] Resume error:", err);
     }
   });
 
