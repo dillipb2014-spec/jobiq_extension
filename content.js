@@ -1,25 +1,28 @@
 // JobIQ AI - Content Script
-console.log("[JobIQ] Content script loaded. Extension ID:", chrome.runtime?.id);
+console.log("[JobIQ] Loaded. Extension ID:", chrome.runtime?.id);
 
-// Extension health check
-function isExtensionAlive() {
-  return !!chrome.runtime?.id;
-}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let lastUrl = location.href;
+let currentTitle = "";
+let currentCompany = "";
 
-// Safe JSON extractor - handles Gemini wrapping text around JSON
+// ── Extension health check ────────────────────────────────────────────────────
+function isAlive() { return !!chrome.runtime?.id; }
+
+// ── Safe JSON extractor ───────────────────────────────────────────────────────
 function extractJSON(text) {
   try {
     const start = text.indexOf("{");
     const end = text.lastIndexOf("}") + 1;
-    if (start === -1 || end === 0) throw new Error("No JSON found");
+    if (start === -1 || end === 0) throw new Error("No JSON");
     return JSON.parse(text.slice(start, end));
   } catch (e) {
-    console.error("[JobIQ] JSON parse failed:", text);
+    console.error("[JobIQ] JSON parse failed:", text.slice(0, 200));
     return null;
   }
 }
 
-// Extract text from PDF using PDF.js
+// ── PDF text extraction ───────────────────────────────────────────────────────
 async function extractTextFromPDF(file) {
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
@@ -27,48 +30,41 @@ async function extractTextFromPDF(file) {
     script.onload = async () => {
       try {
         pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdf.worker.min.js");
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const buf = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
         let text = "";
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const content = await page.getTextContent();
-          text += content.items.map(item => item.str).join(" ") + "\n";
+          text += content.items.map(x => x.str).join(" ") + "\n";
         }
         resolve(text.trim());
-      } catch (e) {
-        reject(e);
-      }
+      } catch (e) { reject(e); }
     };
     script.onerror = reject;
     document.head.appendChild(script);
   });
 }
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-let lastUrl = location.href;
-let currentJD = "";
-let currentTitle = "";
-let currentCompany = "";
-
-// Robust JD Detection with retry
+// ── Get full JD including About the Job section ───────────────────────────────
 function getJobDescription() {
   const selectors = [
     ".jobs-description-content__text",
     ".jobs-box__html-content",
     "#job-details",
     ".show-more-less-html__markup",
-    ".jobs-description__content"
+    ".jobs-description__content",
+    "[class*='description']"
   ];
   for (const sel of selectors) {
     const el = document.querySelector(sel);
-    if (el && el.innerText.length > 100) return el.innerText;
+    if (el && el.innerText.trim().length > 100) return el.innerText.trim();
   }
   return null;
 }
 
 async function waitForJD() {
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 12; i++) {
     const jd = getJobDescription();
     if (jd) return jd;
     await sleep(1000);
@@ -76,7 +72,7 @@ async function waitForJD() {
   return null;
 }
 
-// Inject floating panel
+// ── Inject floating panel ─────────────────────────────────────────────────────
 function injectJobIQPanel() {
   if (document.getElementById("jobiq-panel")) return;
 
@@ -84,78 +80,79 @@ function injectJobIQPanel() {
   panel.id = "jobiq-panel";
   panel.innerHTML = `
     <div id="jobiq-box" style="
-      position:fixed; top:100px; right:20px; width:290px;
+      position:fixed;top:80px;right:20px;width:300px;
       background:linear-gradient(135deg,#0f172a,#1e293b);
-      color:#e2e8f0; padding:14px; border-radius:14px;
-      z-index:99999; box-shadow:0 8px 32px rgba(0,0,0,0.6);
+      color:#e2e8f0;padding:14px;border-radius:14px;
+      z-index:99999;box-shadow:0 8px 32px rgba(0,0,0,0.7);
       border:1px solid #334155;
       font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-      cursor:move; user-select:none;
+      cursor:move;user-select:none;max-height:90vh;overflow-y:auto;
     ">
       <!-- Header -->
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
         <div style="display:flex;align-items:center;gap:6px;">
-          <span style="font-size:16px;">&#x1F9E0;</span>
-          <span style="font-weight:800;font-size:14px;color:#818cf8;">JobIQ AI</span>
+          <span style="font-size:18px;">&#x1F9E0;</span>
+          <span style="font-weight:800;font-size:15px;color:#818cf8;">JobIQ AI</span>
         </div>
-        <button id="jobiq-close" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:16px;">&#x2715;</button>
+        <button id="jobiq-close" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:18px;line-height:1;">&#x2715;</button>
       </div>
 
       <!-- Job Info -->
       <div id="jobiq-job-info" style="font-size:11px;color:#94a3b8;margin-bottom:10px;padding:6px 8px;background:#0f172a;border-radius:8px;display:none;">
-        <div id="jobiq-job-title" style="font-weight:700;color:#e2e8f0;"></div>
-        <div id="jobiq-job-company" style="margin-top:2px;"></div>
+        <div id="jobiq-job-title" style="font-weight:700;color:#e2e8f0;font-size:12px;"></div>
+        <div id="jobiq-job-company" style="margin-top:2px;color:#64748b;"></div>
       </div>
 
       <!-- Match Score -->
-      <div id="jobiq-score-section" style="margin-bottom:10px;display:none;">
+      <div id="jobiq-score-section" style="margin-bottom:12px;display:none;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-          <span style="font-size:11px;color:#94a3b8;font-weight:600;">MATCH SCORE</span>
-          <span id="jobiq-score-num" style="font-size:22px;font-weight:800;color:#34d399;">0%</span>
+          <span style="font-size:11px;color:#94a3b8;font-weight:600;letter-spacing:0.5px;">ATS MATCH SCORE</span>
+          <span id="jobiq-score-num" style="font-size:26px;font-weight:800;color:#34d399;">0%</span>
         </div>
-        <div style="background:#334155;border-radius:99px;height:8px;overflow:hidden;">
-          <div id="jobiq-progress" style="height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#10b981,#34d399);transition:width 0.8s ease;"></div>
+        <div style="background:#334155;border-radius:99px;height:10px;overflow:hidden;">
+          <div id="jobiq-progress" style="height:100%;width:0%;border-radius:99px;transition:width 1s ease;"></div>
         </div>
+        <div id="jobiq-score-label" style="font-size:10px;color:#64748b;margin-top:4px;text-align:right;"></div>
       </div>
 
       <!-- Strong Keywords -->
-      <div id="jobiq-strong-section" style="margin-bottom:8px;display:none;">
-        <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;font-weight:600;">&#x2705; STRONG KEYWORDS</div>
-        <div id="jobiq-strong-tags" style="display:flex;flex-wrap:wrap;gap:3px;"></div>
+      <div id="jobiq-strong-section" style="margin-bottom:10px;display:none;">
+        <div style="font-size:10px;color:#34d399;margin-bottom:5px;font-weight:700;letter-spacing:0.5px;">&#x2705; KEYWORDS IN YOUR RESUME</div>
+        <div id="jobiq-strong-tags" style="display:flex;flex-wrap:wrap;gap:4px;"></div>
       </div>
 
       <!-- Missing Keywords -->
-      <div id="jobiq-missing-section" style="margin-bottom:8px;display:none;">
-        <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;font-weight:600;">&#x274C; MISSING KEYWORDS</div>
-        <div id="jobiq-missing-tags" style="display:flex;flex-wrap:wrap;gap:3px;"></div>
+      <div id="jobiq-missing-section" style="margin-bottom:10px;display:none;">
+        <div style="font-size:10px;color:#f87171;margin-bottom:5px;font-weight:700;letter-spacing:0.5px;">&#x274C; MISSING ATS KEYWORDS</div>
+        <div id="jobiq-missing-tags" style="display:flex;flex-wrap:wrap;gap:4px;"></div>
       </div>
 
-      <!-- How to Improve -->
-      <div id="jobiq-improve-section" style="margin-bottom:8px;display:none;">
-        <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;font-weight:600;">&#x1F4A1; HOW TO IMPROVE</div>
-        <div id="jobiq-improve-list" style="font-size:10px;color:#fbbf24;line-height:1.8;background:#1c1a0a;padding:6px 8px;border-radius:6px;border:1px solid #78350f;"></div>
+      <!-- Add to Resume -->
+      <div id="jobiq-improve-section" style="margin-bottom:10px;display:none;">
+        <div style="font-size:10px;color:#fbbf24;margin-bottom:5px;font-weight:700;letter-spacing:0.5px;">&#x1F4A1; ADD THESE TO YOUR RESUME</div>
+        <div id="jobiq-improve-list" style="font-size:10px;color:#fbbf24;line-height:1.9;background:#1c1500;padding:8px;border-radius:6px;border:1px solid #78350f;"></div>
       </div>
 
-      <!-- Suggestion -->
-      <div id="jobiq-suggestion" style="font-size:10px;color:#93c5fd;background:#1e3a5f;border:1px solid #1d4ed8;border-radius:8px;padding:8px;margin-bottom:10px;line-height:1.6;display:none;"></div>
+      <!-- AI Tip -->
+      <div id="jobiq-suggestion" style="font-size:10px;color:#93c5fd;background:#0f2040;border:1px solid #1d4ed8;border-radius:8px;padding:8px;margin-bottom:10px;line-height:1.7;display:none;"></div>
 
       <!-- Status -->
-      <div id="jobiq-status" style="font-size:11px;padding:6px 8px;border-radius:8px;margin-bottom:8px;background:#1e293b;color:#94a3b8;border:1px solid #334155;">
+      <div id="jobiq-status" style="font-size:11px;padding:7px 10px;border-radius:8px;margin-bottom:8px;background:#1e293b;color:#94a3b8;border:1px solid #334155;line-height:1.5;">
         Open a LinkedIn job to begin.
       </div>
 
       <!-- Resume Upload -->
-      <label id="jobiq-resume-label" style="display:block;font-size:10px;color:#818cf8;background:#1e293b;border:1px dashed #4f46e5;border-radius:8px;padding:6px 10px;margin-bottom:8px;cursor:pointer;text-align:center;">
+      <label id="jobiq-resume-label" style="display:block;font-size:10px;color:#818cf8;background:#1e293b;border:1px dashed #4f46e5;border-radius:8px;padding:7px 10px;margin-bottom:8px;cursor:pointer;text-align:center;">
         &#x1F4C4; Upload Resume (PDF or TXT)
         <input type="file" id="jobiq-resume" accept=".pdf,.txt" style="display:none">
       </label>
 
       <!-- Buttons -->
       <div style="display:flex;gap:6px;">
-        <button id="jobiq-analyze" style="flex:1;padding:8px;border:none;border-radius:8px;cursor:pointer;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;font-size:11px;font-weight:700;">
+        <button id="jobiq-analyze" style="flex:1;padding:9px;border:none;border-radius:8px;cursor:pointer;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;font-size:12px;font-weight:700;">
           &#x1F9E0; Analyze
         </button>
-        <button id="jobiq-apply" disabled style="flex:1;padding:8px;border:none;border-radius:8px;cursor:pointer;background:#374151;color:#6b7280;font-size:11px;font-weight:700;">
+        <button id="jobiq-apply" disabled style="flex:1;padding:9px;border:none;border-radius:8px;cursor:pointer;background:#374151;color:#6b7280;font-size:12px;font-weight:700;">
           &#x1F916; Apply
         </button>
       </div>
@@ -167,107 +164,229 @@ function injectJobIQPanel() {
 
   document.getElementById("jobiq-close").addEventListener("click", () => panel.remove());
 
+  // Resume upload — PDF + TXT
   document.getElementById("jobiq-resume").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setStatus("Reading resume...", "#94a3b8");
     try {
       let text = "";
-      if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+      if (file.name.endsWith(".pdf")) {
         text = await extractTextFromPDF(file);
       } else {
         text = await file.text();
       }
       chrome.storage.local.set({ resumeText: text.slice(0, 8000) });
-      setStatus("Resume uploaded: " + file.name, "#34d399");
-      document.getElementById("jobiq-resume-label").textContent = "Resume: " + file.name;
-    } catch (e) {
-      setStatus("Failed to read resume: " + e.message, "#f87171");
+      setStatus("Resume ready: " + file.name, "#34d399");
+      document.getElementById("jobiq-resume-label").textContent = "&#x2705; " + file.name;
+    } catch (err) {
+      setStatus("Resume read failed: " + err.message, "#f87171");
     }
   });
 
+  // Analyze button
   document.getElementById("jobiq-analyze").addEventListener("click", async () => {
-    setStatus("Detecting job description...", "#94a3b8");
+    if (!isAlive()) {
+      setStatus("Extension reloaded — refresh page (Cmd+Shift+R)", "#f87171");
+      return;
+    }
+    setStatus("Reading job description...", "#94a3b8");
     const jd = await waitForJD();
     if (!jd) {
-      setStatus("No job detected. Click a job card first.", "#f87171");
+      setStatus("No job found. Click a job card and wait.", "#f87171");
       return;
     }
-    currentJD = jd;
-    setStatus("Analyzing with AI...", "#94a3b8");
-
-    // Extension health check before API call
-    if (!isExtensionAlive()) {
-      setStatus("Extension reloaded. Please refresh this page (Cmd+Shift+R).", "#f87171");
-      return;
-    }
-
-    // Call Gemini directly from content script
-    try {
-      const stored = await new Promise(resolve => chrome.storage.local.get(["geminiApiKey", "resumeText"], resolve));
-      const apiKey = stored.geminiApiKey || "AIzaSyC8n0AmvdVjZ7N0PNlVDY1f0SJV9WLyog8";
-      const resume = stored.resumeText || "Dillip Kumar Behera | Talent Acquisition | 4.6 years | Power BI, ATS, Boolean Search, Stakeholder Management, Recruitment Analytics | Juspay, Infosys, Tech Mahindra";
-
-      const prompt = `You are an ATS resume analyzer. Compare resume vs job description.
-Return ONLY valid JSON, no extra text, no explanation:
-{"match":72,"strong_keywords":["kw1","kw2"],"missing_keywords":["kw3","kw4"],"improve_suggestions":["Add kw3 to skills section","Mention kw4 in experience"],"suggestions":"2-3 sentence actionable advice","cover_letter":"Para1\n\nPara2\n\nPara3"}
-
-RESUME:
-${resume.slice(0, 3000)}
-
-JOB DESCRIPTION:
-${jd.slice(0, 2000)}`;
-
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-        }
-      );
-      const raw = await res.json();
-      const text = raw.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-      console.log("[JobIQ] Raw AI response:", text);
-
-      // Use extractJSON to handle Gemini wrapping text around JSON
-      let result = extractJSON(text);
-      if (!result) {
-        result = { match: 0, missing_keywords: [], strong_keywords: [], improve_suggestions: ["Could not parse AI response. Try again."], suggestions: text.slice(0, 200), cover_letter: "" };
-      }
-
-      // Ensure match is a number
-      result.match = Number(result.match) || 0;
-      console.log("[JobIQ] Match score:", result.match);
-      console.log("[JobIQ] Parsed result:", result);
-
-      chrome.storage.local.set({ lastAnalysis: result });
-      showResultInPanel(result);
-    } catch (e) {
-      if (e.message && e.message.includes("Extension context invalidated")) {
-        setStatus("Extension reloaded. Please refresh this page (Cmd+Shift+R).", "#f87171");
-      } else {
-        setStatus("AI error: " + e.message, "#f87171");
-      }
-      console.error("[JobIQ] Error:", e);
-    }
+    setStatus("Analyzing ATS keywords...", "#818cf8");
+    await runAnalysis(jd);
   });
 
+  // Apply button
   document.getElementById("jobiq-apply").addEventListener("click", async () => {
     setStatus("Starting Easy Apply...", "#93c5fd");
     await runEasyApply();
   });
 }
 
-// Drag support
+// ── Core AI Analysis ──────────────────────────────────────────────────────────
+async function runAnalysis(jd) {
+  try {
+    const stored = await new Promise(r => chrome.storage.local.get(["geminiApiKey", "resumeText", "minMatch"], r));
+    const apiKey = stored.geminiApiKey || "AIzaSyC8n0AmvdVjZ7N0PNlVDY1f0SJV9WLyog8";
+    const resume = stored.resumeText ||
+      "Dillip Kumar Behera | Talent Acquisition | 4.6 years | Juspay, Infosys, Tech Mahindra | Skills: Power BI, ATS, Boolean Search, Stakeholder Management, End-to-End Recruitment, Offer Negotiation, Campus Hiring, BGV, Compliance, Recruitment Analytics, Workflow Automation";
+
+    const prompt = `You are an expert ATS (Applicant Tracking System) analyzer.
+
+TASK: Deeply analyze the Job Description and extract ALL important ATS keywords. Then check which ones exist in the resume.
+
+Return ONLY this exact JSON (no extra text, no markdown):
+{
+  "match": 72,
+  "strong_keywords": ["keyword1", "keyword2"],
+  "missing_keywords": ["keyword3", "keyword4"],
+  "improve_suggestions": [
+    "Add 'keyword3' to your Skills section",
+    "Mention 'keyword4' in your work experience at Juspay"
+  ],
+  "suggestions": "2-3 sentence specific advice to improve this application",
+  "cover_letter": "Paragraph 1\\n\\nParagraph 2\\n\\nParagraph 3"
+}
+
+Rules:
+- match = integer 0-100 (realistic ATS score based on keyword overlap + experience fit)
+- strong_keywords = ATS keywords found in BOTH resume and JD (max 10)
+- missing_keywords = important ATS keywords in JD but NOT in resume (max 10)
+- improve_suggestions = exact actionable steps to add missing keywords to resume
+- Focus on the "About the Job", "Requirements", "Responsibilities" sections of JD
+
+RESUME:
+${resume.slice(0, 3000)}
+
+JOB DESCRIPTION:
+${jd.slice(0, 3000)}`;
+
+    console.log("[JobIQ] Calling Gemini API...");
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      }
+    );
+
+    const raw = await res.json();
+    console.log("[JobIQ] Raw API response:", raw);
+
+    if (raw.error) {
+      setStatus("API Error: " + raw.error.message, "#f87171");
+      return;
+    }
+
+    const text = raw.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    console.log("[JobIQ] AI text:", text);
+
+    let result = extractJSON(text);
+    if (!result) {
+      setStatus("Could not parse AI response. Try again.", "#f87171");
+      return;
+    }
+
+    result.match = Number(result.match) || 0;
+    console.log("[JobIQ] Final result:", result);
+
+    chrome.storage.local.set({ lastAnalysis: result });
+    showResultInPanel(result, stored.minMatch || 50);
+
+  } catch (err) {
+    if (err.message && err.message.includes("Extension context invalidated")) {
+      setStatus("Extension reloaded — refresh page (Cmd+Shift+R)", "#f87171");
+    } else {
+      setStatus("Error: " + err.message, "#f87171");
+    }
+    console.error("[JobIQ] Analysis error:", err);
+  }
+}
+
+// ── Show result in panel ──────────────────────────────────────────────────────
+function showResultInPanel(data, minMatch) {
+  const match = Number(data.match) || 0;
+  const min = minMatch || 50;
+
+  // Score
+  const scoreEl = document.getElementById("jobiq-score-num");
+  const progressEl = document.getElementById("jobiq-progress");
+  const scoreSection = document.getElementById("jobiq-score-section");
+  const scoreLabel = document.getElementById("jobiq-score-label");
+
+  if (scoreEl) {
+    scoreEl.textContent = match + "%";
+    const color = match >= 70 ? "#34d399" : match >= 50 ? "#fbbf24" : "#f87171";
+    scoreEl.style.color = color;
+    progressEl.style.width = match + "%";
+    progressEl.style.background = match >= 70
+      ? "linear-gradient(90deg,#10b981,#34d399)"
+      : match >= 50
+      ? "linear-gradient(90deg,#f59e0b,#fbbf24)"
+      : "linear-gradient(90deg,#ef4444,#f87171)";
+    scoreLabel.textContent = match >= 70 ? "Strong match" : match >= 50 ? "Moderate match" : "Weak match — improve resume";
+    scoreSection.style.display = "block";
+  }
+
+  // Strong keywords
+  const strongSection = document.getElementById("jobiq-strong-section");
+  const strongTags = document.getElementById("jobiq-strong-tags");
+  if (data.strong_keywords && data.strong_keywords.length) {
+    strongTags.innerHTML = data.strong_keywords.map(k =>
+      `<span style="font-size:10px;padding:3px 8px;border-radius:99px;background:#064e3b;color:#34d399;border:1px solid #065f46;font-weight:600;">${k}</span>`
+    ).join("");
+    strongSection.style.display = "block";
+  }
+
+  // Missing keywords
+  const missingSection = document.getElementById("jobiq-missing-section");
+  const missingTags = document.getElementById("jobiq-missing-tags");
+  if (data.missing_keywords && data.missing_keywords.length) {
+    missingTags.innerHTML = data.missing_keywords.map(k =>
+      `<span style="font-size:10px;padding:3px 8px;border-radius:99px;background:#450a0a;color:#f87171;border:1px solid #7f1d1d;font-weight:600;">${k}</span>`
+    ).join("");
+    missingSection.style.display = "block";
+  }
+
+  // Improve suggestions
+  const improveSection = document.getElementById("jobiq-improve-section");
+  const improveList = document.getElementById("jobiq-improve-list");
+  if (data.improve_suggestions && data.improve_suggestions.length) {
+    improveList.innerHTML = data.improve_suggestions.map(s =>
+      `<div style="margin-bottom:2px;">&#x2022; ${s}</div>`
+    ).join("");
+    improveSection.style.display = "block";
+  }
+
+  // AI tip
+  const suggEl = document.getElementById("jobiq-suggestion");
+  if (data.suggestions) {
+    suggEl.textContent = "&#x1F4A1; " + data.suggestions;
+    suggEl.style.display = "block";
+  }
+
+  // Apply button — check Easy Apply availability
+  const hasEasyApply = [...document.querySelectorAll("button.jobs-apply-button")]
+    .some(b => (b.getAttribute("aria-label") || "").toLowerCase().includes("easy apply") && b.offsetParent);
+
+  const applyBtn = document.getElementById("jobiq-apply");
+  if (applyBtn) {
+    if (match >= min && hasEasyApply) {
+      applyBtn.disabled = false;
+      applyBtn.style.background = "linear-gradient(135deg,#10b981,#059669)";
+      applyBtn.style.color = "white";
+      applyBtn.textContent = "Easy Apply";
+      setStatus(match + "% match — Easy Apply ready!", "#34d399");
+    } else if (match >= min && !hasEasyApply) {
+      applyBtn.disabled = true;
+      applyBtn.style.background = "#374151";
+      applyBtn.style.color = "#6b7280";
+      applyBtn.textContent = "External Apply";
+      setStatus(match + "% match — No Easy Apply on this job.", "#fbbf24");
+    } else {
+      applyBtn.disabled = true;
+      applyBtn.style.background = "#374151";
+      applyBtn.style.color = "#6b7280";
+      applyBtn.textContent = "Apply";
+      setStatus(match + "% — Add missing keywords to resume first.", "#f87171");
+    }
+  }
+}
+
+// ── Drag support ──────────────────────────────────────────────────────────────
 function makeDraggable(el) {
   let ox = 0, oy = 0, mx = 0, my = 0;
   el.addEventListener("mousedown", (e) => {
-    if (e.target.tagName === "BUTTON" || e.target.tagName === "INPUT" || e.target.tagName === "LABEL") return;
+    if (["BUTTON", "INPUT", "LABEL"].includes(e.target.tagName)) return;
     e.preventDefault();
     ox = e.clientX; oy = e.clientY;
     document.addEventListener("mousemove", drag);
-    document.addEventListener("mouseup", stopDrag);
+    document.addEventListener("mouseup", stop);
   });
   function drag(e) {
     mx = ox - e.clientX; my = oy - e.clientY;
@@ -276,9 +395,9 @@ function makeDraggable(el) {
     el.style.right = "auto";
     el.style.left = (el.offsetLeft - mx) + "px";
   }
-  function stopDrag() {
+  function stop() {
     document.removeEventListener("mousemove", drag);
-    document.removeEventListener("mouseup", stopDrag);
+    document.removeEventListener("mouseup", stop);
   }
 }
 
@@ -287,144 +406,40 @@ function setStatus(msg, color) {
   if (el) { el.textContent = msg; el.style.color = color || "#94a3b8"; }
 }
 
-// Extract JD and update panel
+// ── Extract job title/company and update panel ────────────────────────────────
 function extractAndSendJD() {
   const titleEl = document.querySelector("h1.job-details-jobs-unified-top-card__job-title, h1.t-24");
   const companyEl = document.querySelector(".job-details-jobs-unified-top-card__company-name a, .jobs-unified-top-card__company-name a");
-
   currentTitle = titleEl?.innerText?.trim() || "";
   currentCompany = companyEl?.innerText?.trim() || "";
-
   if (currentTitle) {
-    const infoEl = document.getElementById("jobiq-job-info");
-    if (infoEl) {
-      infoEl.style.display = "block";
+    const info = document.getElementById("jobiq-job-info");
+    if (info) {
+      info.style.display = "block";
       document.getElementById("jobiq-job-title").textContent = currentTitle;
       document.getElementById("jobiq-job-company").textContent = currentCompany;
     }
-    setStatus(currentTitle + " detected. Click Analyze.", "#34d399");
+    setStatus(currentTitle + " — Click Analyze", "#34d399");
   }
 }
 
-// Show analysis result in panel
-function showResultInPanel(data) {
-  const match = data.match || 0;
-
-  // Score + progress bar
-  const scoreEl = document.getElementById("jobiq-score-num");
-  const progressEl = document.getElementById("jobiq-progress");
-  const scoreSection = document.getElementById("jobiq-score-section");
-  if (scoreEl) {
-    scoreEl.textContent = match + "%";
-    scoreEl.style.color = match >= 70 ? "#34d399" : match >= 50 ? "#fbbf24" : "#f87171";
-    progressEl.style.width = match + "%";
-    progressEl.style.background = match >= 70
-      ? "linear-gradient(90deg,#10b981,#34d399)"
-      : match >= 50
-      ? "linear-gradient(90deg,#f59e0b,#fbbf24)"
-      : "linear-gradient(90deg,#ef4444,#f87171)";
-    scoreSection.style.display = "block";
-  }
-
-  // Strong keywords (green)
-  const strongSection = document.getElementById("jobiq-strong-section");
-  const strongTags = document.getElementById("jobiq-strong-tags");
-  if (strongSection && data.strong_keywords && data.strong_keywords.length) {
-    strongTags.innerHTML = data.strong_keywords.map(k =>
-      '<span style="font-size:10px;padding:2px 7px;border-radius:99px;background:#064e3b;color:#34d399;border:1px solid #065f46;">' + k + '</span>'
-    ).join("");
-    strongSection.style.display = "block";
-  }
-
-  // Missing keywords (red)
-  const missingSection = document.getElementById("jobiq-missing-section");
-  const missingTags = document.getElementById("jobiq-missing-tags");
-  if (missingSection && data.missing_keywords && data.missing_keywords.length) {
-    missingTags.innerHTML = data.missing_keywords.map(k =>
-      '<span style="font-size:10px;padding:2px 7px;border-radius:99px;background:#450a0a;color:#f87171;border:1px solid #7f1d1d;">' + k + '</span>'
-    ).join("");
-    missingSection.style.display = "block";
-  }
-
-  // How to improve (yellow bullets)
-  const improveSection = document.getElementById("jobiq-improve-section");
-  const improveList = document.getElementById("jobiq-improve-list");
-  if (improveSection && data.improve_suggestions && data.improve_suggestions.length) {
-    improveList.innerHTML = data.improve_suggestions.map(s => "<div>• " + s + "</div>").join("");
-    improveSection.style.display = "block";
-  }
-
-  // AI suggestion
-  const suggEl = document.getElementById("jobiq-suggestion");
-  if (suggEl && data.suggestions) {
-    suggEl.textContent = "Tip: " + data.suggestions;
-    suggEl.style.display = "block";
-  }
-
-  // Check if Easy Apply button exists on this job
-  const hasEasyApply = [...document.querySelectorAll("button.jobs-apply-button")]
-    .some(b => (b.getAttribute("aria-label") || "").toLowerCase().includes("easy apply") && b.offsetParent);
-
-  // Enable/disable apply button
-  const applyBtn = document.getElementById("jobiq-apply");
-  if (applyBtn) {
-    chrome.storage.local.get(["minMatch"], (r) => {
-      const min = r.minMatch || 50;
-      if (match >= min && hasEasyApply) {
-        applyBtn.disabled = false;
-        applyBtn.style.background = "linear-gradient(135deg,#10b981,#059669)";
-        applyBtn.style.color = "white";
-        applyBtn.textContent = "Easy Apply";
-        setStatus(match + "% match - Easy Apply ready!", "#34d399");
-      } else if (match >= min && !hasEasyApply) {
-        applyBtn.disabled = true;
-        applyBtn.style.background = "#374151";
-        applyBtn.style.color = "#6b7280";
-        applyBtn.textContent = "External Apply";
-        setStatus(match + "% match - No Easy Apply on this job.", "#fbbf24");
-      } else {
-        applyBtn.disabled = true;
-        applyBtn.style.background = "#374151";
-        applyBtn.style.color = "#6b7280";
-        applyBtn.textContent = "Apply";
-        setStatus(match + "% - below minimum " + min + "%. Improve resume.", "#fbbf24");
-      }
-    });
-  }
-}
-
-// Listen for messages from background
+// ── Message listener ──────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.type === "SHOW_RESULT") showResultInPanel(msg.data);
+  if (msg.type === "SHOW_RESULT") showResultInPanel(msg.data, 50);
   if (msg.type === "ANALYSIS_ERROR") setStatus(msg.error, "#f87171");
-  if (msg.type === "APPLY_STATUS") {
-    const colors = { started: "#93c5fd", progress: "#93c5fd", success: "#34d399", error: "#f87171", no_button: "#f87171" };
-    setStatus(msg.msg, colors[msg.status] || "#94a3b8");
-  }
 });
 
-window.addEventListener("message", async (e) => {
-  if (e.data && e.data.type === "JOBIQ_START_APPLY") await runEasyApply();
-});
-
-// Easy Apply Automation
+// ── Easy Apply ────────────────────────────────────────────────────────────────
 async function runEasyApply() {
-  const applyBtn = [...document.querySelectorAll("button.jobs-apply-button")]
+  const btn = [...document.querySelectorAll("button.jobs-apply-button")]
     .find(b => (b.getAttribute("aria-label") || "").toLowerCase().includes("easy apply") && b.offsetParent);
+  if (!btn) { setStatus("No Easy Apply button found.", "#f87171"); return; }
 
-  if (!applyBtn) {
-    setStatus("No Easy Apply button found on this job.", "#f87171");
-    return;
-  }
-
-  applyBtn.click();
+  btn.click();
   await sleep(2500);
 
   const modal = document.querySelector("div.jobs-easy-apply-modal");
-  if (!modal) {
-    setStatus("Modal did not open.", "#f87171");
-    return;
-  }
+  if (!modal) { setStatus("Modal did not open.", "#f87171"); return; }
 
   for (let step = 0; step < 10; step++) {
     await sleep(1500);
@@ -439,20 +454,19 @@ async function runEasyApply() {
       await sleep(500);
       submitBtn.click();
       await sleep(2000);
-      const title = document.querySelector("h1") ? document.querySelector("h1").innerText.trim() : currentTitle;
+      const title = document.querySelector("h1")?.innerText?.trim() || currentTitle;
       chrome.runtime.sendMessage({ type: "JOB_APPLIED", title, company: currentCompany, match: 0, status: "Applied" });
       setStatus("Applied to " + title + " @ " + currentCompany, "#34d399");
-      const dismiss = document.querySelector("button[aria-label='Dismiss']");
-      if (dismiss) dismiss.click();
+      document.querySelector("button[aria-label='Dismiss']")?.click();
       return;
     }
 
     const nextBtn = getModalBtn(modal, ["Continue to next step", "Review your application", "Next", "Continue", "Review"]);
     if (nextBtn) {
-      setStatus("Step " + (step + 1) + " - " + nextBtn.textContent.trim(), "#93c5fd");
+      setStatus("Step " + (step + 1) + " — " + nextBtn.textContent.trim(), "#93c5fd");
       nextBtn.click();
     } else {
-      setStatus("Could not find Next/Submit button.", "#f87171");
+      setStatus("Could not find Next/Submit.", "#f87171");
       break;
     }
   }
@@ -468,28 +482,22 @@ function getModalBtn(modal, keywords) {
 }
 
 function fillFormFields(modal) {
-  const DEFAULT_PROFILE = {
-    phone: "7750978982", name: "Dillip Kumar Behera",
-    email: "dillipb2014@gmail.com", experience: "4",
-    currentSalary: "900000", expectedSalary: "1200000", noticePeriod: "30"
-  };
+  const DEF = { phone: "7750978982", name: "Dillip Kumar Behera", email: "dillipb2014@gmail.com", experience: "4", currentSalary: "900000", expectedSalary: "1200000", noticePeriod: "30" };
   chrome.storage.local.get(["candidateProfile"], (data) => {
-    const p = Object.assign({}, DEFAULT_PROFILE, data.candidateProfile || {});
-    const fieldMap = {
-      "phone": p.phone, "mobile": p.phone,
-      "city": "Bangalore", "location": "Bangalore",
+    const p = Object.assign({}, DEF, data.candidateProfile || {});
+    const map = {
+      "phone": p.phone, "mobile": p.phone, "city": "Bangalore", "location": "Bangalore",
       "years of experience": p.experience, "experience": p.experience,
       "current salary": p.currentSalary, "current ctc": p.currentSalary,
       "expected": p.expectedSalary, "notice": p.noticePeriod,
-      "name": p.name, "full name": p.name, "email": p.email,
+      "name": p.name, "full name": p.name, "email": p.email
     };
-    modal.querySelectorAll("input[type='text'], input[type='tel'], input[type='number']").forEach(inp => {
+    modal.querySelectorAll("input[type='text'],input[type='tel'],input[type='number']").forEach(inp => {
       const id = inp.getAttribute("id") || "";
-      const labelEl = modal.querySelector("label[for='" + id + "']");
-      const label = (labelEl ? labelEl.textContent : "").toLowerCase();
-      const placeholder = (inp.getAttribute("placeholder") || "").toLowerCase();
-      const combined = label + " " + placeholder;
-      for (const [key, val] of Object.entries(fieldMap)) {
+      const lbl = (modal.querySelector("label[for='" + id + "']")?.textContent || "").toLowerCase();
+      const ph = (inp.getAttribute("placeholder") || "").toLowerCase();
+      const combined = lbl + " " + ph;
+      for (const [key, val] of Object.entries(map)) {
         if (combined.includes(key) && val && !inp.value.trim()) {
           inp.value = val;
           inp.dispatchEvent(new Event("input", { bubbles: true }));
@@ -504,7 +512,7 @@ function fillFormFields(modal) {
   });
 }
 
-// SPA URL polling
+// ── SPA URL polling ───────────────────────────────────────────────────────────
 setInterval(() => {
   if (location.href !== lastUrl) {
     lastUrl = location.href;
@@ -514,8 +522,6 @@ setInterval(() => {
   }
 }, 1000);
 
-// Initial load
-window.addEventListener("load", () => {
-  setTimeout(() => { injectJobIQPanel(); extractAndSendJD(); }, 3000);
-});
+// ── Initial load ──────────────────────────────────────────────────────────────
+window.addEventListener("load", () => setTimeout(() => { injectJobIQPanel(); extractAndSendJD(); }, 3000));
 setTimeout(() => { injectJobIQPanel(); extractAndSendJD(); }, 3000);
