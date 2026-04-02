@@ -59,22 +59,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         console.log("[JobIQ] Using API Key:", !!finalApiKey);
         console.log("[JobIQ] Resume Length:", finalResume.length);
 
-        const prompt = `You are a career coach AI. Analyze this resume against the job description.
+        const prompt = `You are an expert ATS (Applicant Tracking System) and career coach AI.
 
-Return ONLY valid JSON:
+Analyze the resume against the job description and return a STRICT JSON response.
+
+Rules:
+- "match" must be an integer 0-100 based on skills overlap, experience relevance, and role alignment
+- "missing_keywords" = important keywords in JD that are NOT in resume (max 8)
+- "strong_keywords" = keywords present in BOTH resume and JD (max 8)
+- "improve_suggestions" = specific keywords/phrases candidate should ADD to their resume to improve match
+- "suggestions" = 2-3 sentence actionable advice on how to tailor the resume for this specific role
+- "cover_letter" = 3 paragraph personalized cover letter addressing the specific JD requirements
+
+Return ONLY this JSON, no extra text:
 {
-  "match": 75,
-  "missing_keywords": ["keyword1"],
-  "strong_keywords": ["keyword2"],
-  "suggestions": "2-3 sentence advice",
-  "cover_letter": "3 paragraph cover letter"
+  "match": 72,
+  "missing_keywords": ["keyword1", "keyword2"],
+  "strong_keywords": ["keyword3", "keyword4"],
+  "improve_suggestions": ["Add: keyword1 in your skills section", "Mention: keyword2 in your experience"],
+  "suggestions": "Actionable advice here.",
+  "cover_letter": "Para 1...\n\nPara 2...\n\nPara 3..."
 }
 
 RESUME:
-${finalResume.slice(0, 1500)}
+${finalResume.slice(0, 2000)}
 
 JOB DESCRIPTION:
-${msg.jd.slice(0, 1500)}`;
+${msg.jd.slice(0, 2000)}`;
 
         fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${finalApiKey}`,

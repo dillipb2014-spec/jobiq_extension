@@ -1,4 +1,4 @@
-// ─── JobIQ AI — Content Script with Floating Panel ───────────────────────────
+// JobIQ AI - Content Script
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let lastUrl = location.href;
@@ -6,7 +6,7 @@ let currentJD = "";
 let currentTitle = "";
 let currentCompany = "";
 
-// ── Robust JD Detection ───────────────────────────────────────────────────────
+// Robust JD Detection with retry
 function getJobDescription() {
   const selectors = [
     ".jobs-description-content__text",
@@ -31,7 +31,7 @@ async function waitForJD() {
   return null;
 }
 
-// ── Inject floating panel ─────────────────────────────────────────────────────
+// Inject floating panel
 function injectJobIQPanel() {
   if (document.getElementById("jobiq-panel")) return;
 
@@ -39,88 +39,80 @@ function injectJobIQPanel() {
   panel.id = "jobiq-panel";
   panel.innerHTML = `
     <div id="jobiq-box" style="
-      position: fixed;
-      top: 100px;
-      right: 20px;
-      width: 280px;
-      background: linear-gradient(135deg, #0f172a, #1e293b);
-      color: #e2e8f0;
-      padding: 14px;
-      border-radius: 14px;
-      z-index: 99999;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
-      border: 1px solid #334155;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      cursor: move;
-      user-select: none;
+      position:fixed; top:100px; right:20px; width:290px;
+      background:linear-gradient(135deg,#0f172a,#1e293b);
+      color:#e2e8f0; padding:14px; border-radius:14px;
+      z-index:99999; box-shadow:0 8px 32px rgba(0,0,0,0.6);
+      border:1px solid #334155;
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+      cursor:move; user-select:none;
     ">
       <!-- Header -->
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-        <div style="display:flex; align-items:center; gap:6px;">
-          <span style="font-size:16px;">🧠</span>
-          <span style="font-weight:800; font-size:14px; background:linear-gradient(90deg,#818cf8,#a78bfa); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">JobIQ AI</span>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:16px;">&#x1F9E0;</span>
+          <span style="font-weight:800;font-size:14px;color:#818cf8;">JobIQ AI</span>
         </div>
-        <button id="jobiq-close" style="background:none; border:none; color:#64748b; cursor:pointer; font-size:16px; line-height:1;">✕</button>
+        <button id="jobiq-close" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:16px;">&#x2715;</button>
       </div>
 
       <!-- Job Info -->
-      <div id="jobiq-job-info" style="font-size:11px; color:#94a3b8; margin-bottom:10px; padding:6px 8px; background:#0f172a; border-radius:8px; display:none;">
-        <div id="jobiq-job-title" style="font-weight:700; color:#e2e8f0;"></div>
+      <div id="jobiq-job-info" style="font-size:11px;color:#94a3b8;margin-bottom:10px;padding:6px 8px;background:#0f172a;border-radius:8px;display:none;">
+        <div id="jobiq-job-title" style="font-weight:700;color:#e2e8f0;"></div>
         <div id="jobiq-job-company" style="margin-top:2px;"></div>
       </div>
 
       <!-- Match Score -->
-      <div id="jobiq-score-section" style="margin-bottom:10px; display:none;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <span style="font-size:11px; color:#94a3b8; font-weight:600;">MATCH SCORE</span>
-          <span id="jobiq-score-num" style="font-size:22px; font-weight:800; color:#34d399;">—</span>
+      <div id="jobiq-score-section" style="margin-bottom:10px;display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span style="font-size:11px;color:#94a3b8;font-weight:600;">MATCH SCORE</span>
+          <span id="jobiq-score-num" style="font-size:22px;font-weight:800;color:#34d399;">0%</span>
         </div>
-        <div style="background:#334155; border-radius:99px; height:8px; overflow:hidden;">
-          <div id="jobiq-progress" style="height:100%; width:0%; border-radius:99px; background:linear-gradient(90deg,#10b981,#34d399); transition:width 0.8s ease;"></div>
+        <div style="background:#334155;border-radius:99px;height:8px;overflow:hidden;">
+          <div id="jobiq-progress" style="height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#10b981,#34d399);transition:width 0.8s ease;"></div>
         </div>
       </div>
 
-      <!-- Keywords -->
-      <div id="jobiq-keywords" style="margin-bottom:10px; display:none;">
-        <div style="font-size:10px; color:#94a3b8; margin-bottom:4px; font-weight:600;">MISSING KEYWORDS</div>
-        <div id="jobiq-missing-tags" style="display:flex; flex-wrap:wrap; gap:3px;"></div>
+      <!-- Strong Keywords -->
+      <div id="jobiq-strong-section" style="margin-bottom:8px;display:none;">
+        <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;font-weight:600;">&#x2705; STRONG KEYWORDS</div>
+        <div id="jobiq-strong-tags" style="display:flex;flex-wrap:wrap;gap:3px;"></div>
+      </div>
+
+      <!-- Missing Keywords -->
+      <div id="jobiq-missing-section" style="margin-bottom:8px;display:none;">
+        <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;font-weight:600;">&#x274C; MISSING KEYWORDS</div>
+        <div id="jobiq-missing-tags" style="display:flex;flex-wrap:wrap;gap:3px;"></div>
+      </div>
+
+      <!-- How to Improve -->
+      <div id="jobiq-improve-section" style="margin-bottom:8px;display:none;">
+        <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;font-weight:600;">&#x1F4A1; HOW TO IMPROVE</div>
+        <div id="jobiq-improve-list" style="font-size:10px;color:#fbbf24;line-height:1.8;background:#1c1a0a;padding:6px 8px;border-radius:6px;border:1px solid #78350f;"></div>
       </div>
 
       <!-- Suggestion -->
-      <div id="jobiq-suggestion" style="
-        font-size:10px; color:#93c5fd; background:#1e3a5f;
-        border:1px solid #1d4ed8; border-radius:8px; padding:8px;
-        margin-bottom:10px; line-height:1.6; display:none;
-      "></div>
+      <div id="jobiq-suggestion" style="font-size:10px;color:#93c5fd;background:#1e3a5f;border:1px solid #1d4ed8;border-radius:8px;padding:8px;margin-bottom:10px;line-height:1.6;display:none;"></div>
 
       <!-- Status -->
-      <div id="jobiq-status" style="
-        font-size:11px; padding:6px 8px; border-radius:8px;
-        margin-bottom:10px; background:#1e293b; color:#94a3b8;
-        border:1px solid #334155;
-      ">Open a LinkedIn job to begin.</div>
+      <div id="jobiq-status" style="font-size:11px;padding:6px 8px;border-radius:8px;margin-bottom:8px;background:#1e293b;color:#94a3b8;border:1px solid #334155;">
+        Open a LinkedIn job to begin.
+      </div>
 
       <!-- Resume Upload -->
-      <label id="jobiq-resume-label" style="
-        display:block; font-size:10px; color:#818cf8; background:#1e293b;
-        border:1px dashed #4f46e5; border-radius:8px; padding:6px 10px;
-        margin-bottom:8px; cursor:pointer; text-align:center;
-      ">📄 Upload Resume (.txt)
+      <label id="jobiq-resume-label" style="display:block;font-size:10px;color:#818cf8;background:#1e293b;border:1px dashed #4f46e5;border-radius:8px;padding:6px 10px;margin-bottom:8px;cursor:pointer;text-align:center;">
+        &#x1F4C4; Upload Resume (.txt)
         <input type="file" id="jobiq-resume" accept=".txt" style="display:none">
       </label>
 
       <!-- Buttons -->
-      <div style="display:flex; gap:6px;">
-        <button id="jobiq-analyze" style="
-          flex:1; padding:8px; border:none; border-radius:8px; cursor:pointer;
-          background:linear-gradient(135deg,#6366f1,#8b5cf6); color:white;
-          font-size:11px; font-weight:700;
-        ">🧠 Analyze</button>
-        <button id="jobiq-apply" disabled style="
-          flex:1; padding:8px; border:none; border-radius:8px; cursor:pointer;
-          background:#374151; color:#6b7280;
-          font-size:11px; font-weight:700;
-        ">🤖 Apply</button>
+      <div style="display:flex;gap:6px;">
+        <button id="jobiq-analyze" style="flex:1;padding:8px;border:none;border-radius:8px;cursor:pointer;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;font-size:11px;font-weight:700;">
+          &#x1F9E0; Analyze
+        </button>
+        <button id="jobiq-apply" disabled style="flex:1;padding:8px;border:none;border-radius:8px;cursor:pointer;background:#374151;color:#6b7280;font-size:11px;font-weight:700;">
+          &#x1F916; Apply
+        </button>
       </div>
     </div>
   `;
@@ -128,51 +120,40 @@ function injectJobIQPanel() {
   document.body.appendChild(panel);
   makeDraggable(document.getElementById("jobiq-box"));
 
-  // Close button
-  document.getElementById("jobiq-close").addEventListener("click", () => {
-    panel.remove();
-  });
+  document.getElementById("jobiq-close").addEventListener("click", () => panel.remove());
 
-  // Resume upload in panel
   document.getElementById("jobiq-resume").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const text = await file.text();
     chrome.storage.local.set({ resumeText: text });
-    setStatus("✅ Resume uploaded!", "#34d399");
-    document.getElementById("jobiq-resume-label").textContent = `✅ ${file.name}`;
+    setStatus("Resume uploaded!", "#34d399");
+    document.getElementById("jobiq-resume-label").textContent = "Resume: " + file.name;
   });
 
-  // Analyze button
   document.getElementById("jobiq-analyze").addEventListener("click", async () => {
-    setStatus("⏳ Detecting job description...", "#94a3b8");
+    setStatus("Detecting job description...", "#94a3b8");
     const jd = await waitForJD();
     if (!jd) {
-      setStatus("❌ No job detected. Click a job and wait 2 seconds.", "#f87171");
-      return;
-    }
-    const { resumeText } = await chrome.storage.local.get("resumeText");
-    if (!resumeText) {
-      setStatus("⚠️ Please upload your resume first.", "#fbbf24");
+      setStatus("No job detected. Click a job card first.", "#f87171");
       return;
     }
     currentJD = jd;
-    setStatus("🧠 Analyzing with AI...", "#94a3b8");
+    setStatus("Analyzing with AI...", "#94a3b8");
     chrome.runtime.sendMessage({ type: "GET_ANALYSIS", jd });
   });
 
-  // Apply button
   document.getElementById("jobiq-apply").addEventListener("click", async () => {
-    setStatus("🤖 Starting Easy Apply...", "#93c5fd");
+    setStatus("Starting Easy Apply...", "#93c5fd");
     await runEasyApply();
   });
 }
 
-// ── Drag support ──────────────────────────────────────────────────────────────
+// Drag support
 function makeDraggable(el) {
   let ox = 0, oy = 0, mx = 0, my = 0;
   el.addEventListener("mousedown", (e) => {
-    if (e.target.tagName === "BUTTON") return;
+    if (e.target.tagName === "BUTTON" || e.target.tagName === "INPUT" || e.target.tagName === "LABEL") return;
     e.preventDefault();
     ox = e.clientX; oy = e.clientY;
     document.addEventListener("mousemove", drag);
@@ -191,25 +172,16 @@ function makeDraggable(el) {
   }
 }
 
-// ── Status helper ─────────────────────────────────────────────────────────────
-function setStatus(msg, color = "#94a3b8") {
+function setStatus(msg, color) {
   const el = document.getElementById("jobiq-status");
-  if (el) { el.textContent = msg; el.style.color = color; }
+  if (el) { el.textContent = msg; el.style.color = color || "#94a3b8"; }
 }
 
-// ── Extract JD from page ──────────────────────────────────────────────────────
+// Extract JD and update panel
 function extractAndSendJD() {
-  const jdEl = document.querySelector(
-    ".jobs-description-content__text, .show-more-less-html__markup, .jobs-description__content"
-  );
-  const titleEl = document.querySelector(
-    "h1.job-details-jobs-unified-top-card__job-title, h1.t-24"
-  );
-  const companyEl = document.querySelector(
-    ".job-details-jobs-unified-top-card__company-name a, .jobs-unified-top-card__company-name a"
-  );
+  const titleEl = document.querySelector("h1.job-details-jobs-unified-top-card__job-title, h1.t-24");
+  const companyEl = document.querySelector(".job-details-jobs-unified-top-card__company-name a, .jobs-unified-top-card__company-name a");
 
-  currentJD = jdEl?.innerText || "";
   currentTitle = titleEl?.innerText?.trim() || "";
   currentCompany = companyEl?.innerText?.trim() || "";
 
@@ -220,26 +192,22 @@ function extractAndSendJD() {
       document.getElementById("jobiq-job-title").textContent = currentTitle;
       document.getElementById("jobiq-job-company").textContent = currentCompany;
     }
-    setStatus(`📄 ${currentTitle} detected. Click Analyze.`, "#34d399");
-  }
-
-  if (currentJD) {
-    chrome.runtime.sendMessage({ type: "JD_DETECTED", jd: currentJD, title: currentTitle, company: currentCompany });
+    setStatus(currentTitle + " detected. Click Analyze.", "#34d399");
   }
 }
 
-// ── Show analysis result in panel ─────────────────────────────────────────────
+// Show analysis result in panel
 function showResultInPanel(data) {
   const match = data.match || 0;
 
-  // Score
+  // Score + progress bar
   const scoreEl = document.getElementById("jobiq-score-num");
   const progressEl = document.getElementById("jobiq-progress");
   const scoreSection = document.getElementById("jobiq-score-section");
   if (scoreEl) {
-    scoreEl.textContent = `${match}%`;
+    scoreEl.textContent = match + "%";
     scoreEl.style.color = match >= 70 ? "#34d399" : match >= 50 ? "#fbbf24" : "#f87171";
-    progressEl.style.width = `${match}%`;
+    progressEl.style.width = match + "%";
     progressEl.style.background = match >= 70
       ? "linear-gradient(90deg,#10b981,#34d399)"
       : match >= 50
@@ -248,62 +216,94 @@ function showResultInPanel(data) {
     scoreSection.style.display = "block";
   }
 
-  // Missing keywords
-  const missingEl = document.getElementById("jobiq-missing-tags");
-  const kwSection = document.getElementById("jobiq-keywords");
-  if (missingEl && data.missing_keywords?.length) {
-    missingEl.innerHTML = data.missing_keywords.map(k =>
-      `<span style="font-size:10px; padding:2px 7px; border-radius:99px; background:#450a0a; color:#f87171; border:1px solid #7f1d1d;">${k}</span>`
+  // Strong keywords (green)
+  const strongSection = document.getElementById("jobiq-strong-section");
+  const strongTags = document.getElementById("jobiq-strong-tags");
+  if (strongSection && data.strong_keywords && data.strong_keywords.length) {
+    strongTags.innerHTML = data.strong_keywords.map(k =>
+      '<span style="font-size:10px;padding:2px 7px;border-radius:99px;background:#064e3b;color:#34d399;border:1px solid #065f46;">' + k + '</span>'
     ).join("");
-    kwSection.style.display = "block";
+    strongSection.style.display = "block";
   }
 
-  // Suggestion
+  // Missing keywords (red)
+  const missingSection = document.getElementById("jobiq-missing-section");
+  const missingTags = document.getElementById("jobiq-missing-tags");
+  if (missingSection && data.missing_keywords && data.missing_keywords.length) {
+    missingTags.innerHTML = data.missing_keywords.map(k =>
+      '<span style="font-size:10px;padding:2px 7px;border-radius:99px;background:#450a0a;color:#f87171;border:1px solid #7f1d1d;">' + k + '</span>'
+    ).join("");
+    missingSection.style.display = "block";
+  }
+
+  // How to improve (yellow bullets)
+  const improveSection = document.getElementById("jobiq-improve-section");
+  const improveList = document.getElementById("jobiq-improve-list");
+  if (improveSection && data.improve_suggestions && data.improve_suggestions.length) {
+    improveList.innerHTML = data.improve_suggestions.map(s => "<div>• " + s + "</div>").join("");
+    improveSection.style.display = "block";
+  }
+
+  // AI suggestion
   const suggEl = document.getElementById("jobiq-suggestion");
   if (suggEl && data.suggestions) {
-    suggEl.textContent = `💡 ${data.suggestions}`;
+    suggEl.textContent = "Tip: " + data.suggestions;
     suggEl.style.display = "block";
   }
 
-  // Enable apply button
+  // Check if Easy Apply button exists on this job
+  const hasEasyApply = [...document.querySelectorAll("button.jobs-apply-button")]
+    .some(b => (b.getAttribute("aria-label") || "").toLowerCase().includes("easy apply") && b.offsetParent);
+
+  // Enable/disable apply button
   const applyBtn = document.getElementById("jobiq-apply");
   if (applyBtn) {
     chrome.storage.local.get(["minMatch"], (r) => {
       const min = r.minMatch || 50;
-      if (match >= min) {
+      if (match >= min && hasEasyApply) {
         applyBtn.disabled = false;
         applyBtn.style.background = "linear-gradient(135deg,#10b981,#059669)";
         applyBtn.style.color = "white";
-        setStatus(`✅ ${match}% match — Ready to Apply!`, "#34d399");
+        applyBtn.textContent = "Easy Apply";
+        setStatus(match + "% match - Easy Apply ready!", "#34d399");
+      } else if (match >= min && !hasEasyApply) {
+        applyBtn.disabled = true;
+        applyBtn.style.background = "#374151";
+        applyBtn.style.color = "#6b7280";
+        applyBtn.textContent = "External Apply";
+        setStatus(match + "% match - No Easy Apply on this job.", "#fbbf24");
       } else {
-        setStatus(`⚠️ ${match}% — below minimum ${min}%. Improve resume.`, "#fbbf24");
+        applyBtn.disabled = true;
+        applyBtn.style.background = "#374151";
+        applyBtn.style.color = "#6b7280";
+        applyBtn.textContent = "Apply";
+        setStatus(match + "% - below minimum " + min + "%. Improve resume.", "#fbbf24");
       }
     });
   }
 }
 
-// ── Listen for messages from background ──────────────────────────────────────
+// Listen for messages from background
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === "SHOW_RESULT") showResultInPanel(msg.data);
-  if (msg.type === "ANALYSIS_ERROR") setStatus(`❌ ${msg.error}`, "#f87171");
+  if (msg.type === "ANALYSIS_ERROR") setStatus(msg.error, "#f87171");
   if (msg.type === "APPLY_STATUS") {
     const colors = { started: "#93c5fd", progress: "#93c5fd", success: "#34d399", error: "#f87171", no_button: "#f87171" };
     setStatus(msg.msg, colors[msg.status] || "#94a3b8");
   }
 });
 
-// ── Listen for Easy Apply trigger from background ─────────────────────────────
 window.addEventListener("message", async (e) => {
-  if (e.data?.type === "JOBIQ_START_APPLY") await runEasyApply();
+  if (e.data && e.data.type === "JOBIQ_START_APPLY") await runEasyApply();
 });
 
-// ── Easy Apply Automation ─────────────────────────────────────────────────────
+// Easy Apply Automation
 async function runEasyApply() {
   const applyBtn = [...document.querySelectorAll("button.jobs-apply-button")]
     .find(b => (b.getAttribute("aria-label") || "").toLowerCase().includes("easy apply") && b.offsetParent);
 
   if (!applyBtn) {
-    chrome.runtime.sendMessage({ type: "APPLY_STATUS", status: "no_button", msg: "No Easy Apply button found." });
+    setStatus("No Easy Apply button found on this job.", "#f87171");
     return;
   }
 
@@ -312,7 +312,7 @@ async function runEasyApply() {
 
   const modal = document.querySelector("div.jobs-easy-apply-modal");
   if (!modal) {
-    chrome.runtime.sendMessage({ type: "APPLY_STATUS", status: "error", msg: "Modal did not open." });
+    setStatus("Modal did not open.", "#f87171");
     return;
   }
 
@@ -329,22 +329,20 @@ async function runEasyApply() {
       await sleep(500);
       submitBtn.click();
       await sleep(2000);
-
-      const title = document.querySelector("h1")?.innerText?.trim() || currentTitle;
-      const company = currentCompany;
-
-      chrome.runtime.sendMessage({ type: "JOB_APPLIED", title, company, match: 0, status: "Applied" });
-      chrome.runtime.sendMessage({ type: "APPLY_STATUS", status: "success", msg: `✅ Applied to ${title} @ ${company}` });
-      document.querySelector("button[aria-label='Dismiss']")?.click();
+      const title = document.querySelector("h1") ? document.querySelector("h1").innerText.trim() : currentTitle;
+      chrome.runtime.sendMessage({ type: "JOB_APPLIED", title, company: currentCompany, match: 0, status: "Applied" });
+      setStatus("Applied to " + title + " @ " + currentCompany, "#34d399");
+      const dismiss = document.querySelector("button[aria-label='Dismiss']");
+      if (dismiss) dismiss.click();
       return;
     }
 
     const nextBtn = getModalBtn(modal, ["Continue to next step", "Review your application", "Next", "Continue", "Review"]);
     if (nextBtn) {
-      chrome.runtime.sendMessage({ type: "APPLY_STATUS", status: "progress", msg: `Step ${step + 1} — ${nextBtn.textContent.trim()}` });
+      setStatus("Step " + (step + 1) + " - " + nextBtn.textContent.trim(), "#93c5fd");
       nextBtn.click();
     } else {
-      chrome.runtime.sendMessage({ type: "APPLY_STATUS", status: "error", msg: "Could not find Next/Submit." });
+      setStatus("Could not find Next/Submit button.", "#f87171");
       break;
     }
   }
@@ -368,20 +366,17 @@ function fillFormFields(modal) {
   chrome.storage.local.get(["candidateProfile"], (data) => {
     const p = Object.assign({}, DEFAULT_PROFILE, data.candidateProfile || {});
     const fieldMap = {
-      "phone": p.phone || "", "mobile": p.phone || "",
+      "phone": p.phone, "mobile": p.phone,
       "city": "Bangalore", "location": "Bangalore",
-      "years of experience": p.experience || "4",
-      "experience": p.experience || "4",
-      "current salary": p.currentSalary || "900000",
-      "current ctc": p.currentSalary || "900000",
-      "expected": p.expectedSalary || "1200000",
-      "notice": p.noticePeriod || "30",
-      "name": p.name || "", "full name": p.name || "",
-      "email": p.email || "",
+      "years of experience": p.experience, "experience": p.experience,
+      "current salary": p.currentSalary, "current ctc": p.currentSalary,
+      "expected": p.expectedSalary, "notice": p.noticePeriod,
+      "name": p.name, "full name": p.name, "email": p.email,
     };
     modal.querySelectorAll("input[type='text'], input[type='tel'], input[type='number']").forEach(inp => {
       const id = inp.getAttribute("id") || "";
-      const label = (modal.querySelector(`label[for='${id}']`)?.textContent || "").toLowerCase();
+      const labelEl = modal.querySelector("label[for='" + id + "']");
+      const label = (labelEl ? labelEl.textContent : "").toLowerCase();
       const placeholder = (inp.getAttribute("placeholder") || "").toLowerCase();
       const combined = label + " " + placeholder;
       for (const [key, val] of Object.entries(fieldMap)) {
@@ -399,7 +394,7 @@ function fillFormFields(modal) {
   });
 }
 
-// ── SPA handling — poll for URL change every 1 second ────────────────────────
+// SPA URL polling
 setInterval(() => {
   if (location.href !== lastUrl) {
     lastUrl = location.href;
@@ -409,7 +404,7 @@ setInterval(() => {
   }
 }, 1000);
 
-// ── Initial load ──────────────────────────────────────────────────────────────
+// Initial load
 window.addEventListener("load", () => {
   setTimeout(() => { injectJobIQPanel(); extractAndSendJD(); }, 3000);
 });
