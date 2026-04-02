@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { width: 380px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; }
+
+    /* Header */
+    .header {
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;
+    }
+    .logo { display: flex; align-items: center; gap: 8px; }
+    .logo-icon { font-size: 20px; }
+    .logo-text { font-size: 16px; font-weight: 800; color: white; }
+    .logo-sub { font-size: 10px; color: rgba(255,255,255,0.7); }
+    .settings-btn { background: rgba(255,255,255,0.15); border: none; color: white; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+
+    /* Tabs */
+    .tabs { display: flex; background: #1e293b; border-bottom: 1px solid #334155; }
+    .tab { flex: 1; padding: 10px; text-align: center; font-size: 12px; font-weight: 600; cursor: pointer; color: #64748b; border-bottom: 2px solid transparent; transition: all 0.2s; }
+    .tab.active { color: #818cf8; border-bottom-color: #818cf8; }
+
+    /* Panels */
+    .panel { display: none; padding: 14px; }
+    .panel.active { display: block; }
+
+    /* Match Score */
+    .match-card {
+      background: #1e293b; border-radius: 12px; padding: 16px; margin-bottom: 12px;
+      border: 1px solid #334155;
+    }
+    .match-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .match-title { font-size: 12px; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .match-score { font-size: 32px; font-weight: 800; }
+    .score-high { color: #34d399; }
+    .score-mid { color: #fbbf24; }
+    .score-low { color: #f87171; }
+
+    .progress-bar { background: #334155; border-radius: 99px; height: 8px; overflow: hidden; margin-bottom: 12px; }
+    .progress-fill { height: 100%; border-radius: 99px; transition: width 0.8s ease; }
+    .fill-high { background: linear-gradient(90deg, #10b981, #34d399); }
+    .fill-mid { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+    .fill-low { background: linear-gradient(90deg, #ef4444, #f87171); }
+
+    /* Keywords */
+    .keywords-section { margin-bottom: 12px; }
+    .kw-label { font-size: 11px; color: #94a3b8; margin-bottom: 6px; font-weight: 600; }
+    .kw-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+    .kw-tag { font-size: 10px; padding: 3px 8px; border-radius: 99px; font-weight: 600; }
+    .kw-strong { background: #064e3b; color: #34d399; border: 1px solid #065f46; }
+    .kw-missing { background: #450a0a; color: #f87171; border: 1px solid #7f1d1d; }
+
+    /* Suggestions */
+    .suggestion-box {
+      background: #1e3a5f; border: 1px solid #1d4ed8; border-radius: 8px;
+      padding: 10px 12px; font-size: 11px; color: #93c5fd; line-height: 1.6; margin-bottom: 12px;
+    }
+
+    /* Job Info */
+    .job-info { background: #1e293b; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; border: 1px solid #334155; }
+    .job-title { font-size: 13px; font-weight: 700; color: #e2e8f0; }
+    .job-company { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+
+    /* Buttons */
+    .btn-row { display: flex; gap: 8px; margin-bottom: 12px; }
+    .btn {
+      flex: 1; padding: 10px; border: none; border-radius: 8px;
+      font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.2s;
+    }
+    .btn-analyze { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; }
+    .btn-analyze:hover { opacity: 0.9; transform: translateY(-1px); }
+    .btn-apply { background: linear-gradient(135deg, #10b981, #059669); color: white; }
+    .btn-apply:hover { opacity: 0.9; transform: translateY(-1px); }
+    .btn-apply:disabled { background: #374151; color: #6b7280; cursor: not-allowed; transform: none; }
+
+    /* Status */
+    .status-bar {
+      padding: 8px 12px; border-radius: 8px; font-size: 11px; margin-bottom: 12px;
+      display: none;
+    }
+    .status-bar.show { display: block; }
+    .status-info { background: #1e3a5f; color: #93c5fd; border: 1px solid #1d4ed8; }
+    .status-success { background: #064e3b; color: #34d399; border: 1px solid #065f46; }
+    .status-error { background: #450a0a; color: #f87171; border: 1px solid #7f1d1d; }
+    .status-loading { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+
+    /* Cover Letter */
+    .cover-letter {
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      padding: 10px; font-size: 10px; color: #94a3b8; line-height: 1.7;
+      max-height: 120px; overflow-y: auto; margin-bottom: 12px; display: none;
+    }
+    .cover-letter.show { display: block; }
+    .cover-letter-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .cover-letter-title { font-size: 11px; font-weight: 600; color: #818cf8; }
+    .copy-btn { font-size: 10px; background: #334155; border: none; color: #94a3b8; padding: 2px 8px; border-radius: 4px; cursor: pointer; }
+
+    /* Settings Panel */
+    .setting-group { margin-bottom: 14px; }
+    .setting-label { font-size: 11px; color: #94a3b8; margin-bottom: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .setting-input {
+      width: 100%; background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+      padding: 8px 10px; border-radius: 8px; font-size: 12px; outline: none;
+    }
+    .setting-input:focus { border-color: #6366f1; }
+    textarea.setting-input { height: 80px; resize: none; font-family: inherit; }
+    .save-btn { width: 100%; padding: 10px; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; }
+    .upload-btn { width: 100%; padding: 8px; background: #1e293b; border: 1px dashed #4f46e5; color: #818cf8; border-radius: 8px; font-size: 12px; cursor: pointer; text-align: center; }
+
+    /* History Panel */
+    .history-list { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; }
+    .history-card { background: #1e293b; border-radius: 8px; padding: 10px 12px; border: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; }
+    .h-title { font-size: 12px; font-weight: 600; color: #e2e8f0; }
+    .h-company { font-size: 10px; color: #64748b; margin-top: 2px; }
+    .h-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 99px; }
+    .badge-applied { background: #064e3b; color: #34d399; }
+    .badge-manual { background: #451a03; color: #fbbf24; }
+    .empty-state { text-align: center; padding: 30px; color: #475569; font-size: 12px; }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 99px; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo">
+      <span class="logo-icon">🧠</span>
+      <div>
+        <div class="logo-text">JobIQ AI</div>
+        <div class="logo-sub">Smart Apply Assistant</div>
+      </div>
+    </div>
+    <button class="settings-btn" id="btnSettings">⚙️</button>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="analyze">🧠 Analyze</div>
+    <div class="tab" data-tab="apply">🤖 Apply</div>
+    <div class="tab" data-tab="history">📋 History</div>
+    <div class="tab" data-tab="settings">⚙️ Settings</div>
+  </div>
+
+  <!-- ANALYZE TAB -->
+  <div class="panel active" id="tab-analyze">
+    <div class="job-info" id="jobInfo" style="display:none">
+      <div class="job-title" id="jobTitle">—</div>
+      <div class="job-company" id="jobCompany">—</div>
+    </div>
+
+    <div class="status-bar status-loading show" id="statusBar">Open a LinkedIn job page to begin analysis.</div>
+
+    <div class="btn-row">
+      <button class="btn btn-analyze" id="btnAnalyze">🧠 Analyze Match</button>
+    </div>
+
+    <div class="match-card" id="matchCard" style="display:none">
+      <div class="match-header">
+        <span class="match-title">Match Score</span>
+        <span class="match-score" id="matchScore">—</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill" style="width:0%"></div>
+      </div>
+
+      <div class="keywords-section">
+        <div class="kw-label">✅ Strong Keywords</div>
+        <div class="kw-tags" id="strongKeywords"></div>
+      </div>
+      <div class="keywords-section" style="margin-top:8px">
+        <div class="kw-label">❌ Missing Keywords</div>
+        <div class="kw-tags" id="missingKeywords"></div>
+      </div>
+    </div>
+
+    <div class="suggestion-box" id="suggestionBox" style="display:none"></div>
+
+    <div class="cover-letter" id="coverLetterBox">
+      <div class="cover-letter-header">
+        <span class="cover-letter-title">📝 Cover Letter</span>
+        <button class="copy-btn" id="copyBtn">Copy</button>
+      </div>
+      <div id="coverLetterText"></div>
+    </div>
+  </div>
+
+  <!-- APPLY TAB -->
+  <div class="panel" id="tab-apply">
+    <div class="match-card">
+      <div class="match-header">
+        <span class="match-title">Current Match</span>
+        <span class="match-score" id="applyMatchScore" style="font-size:24px">—</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="applyProgressFill" style="width:0%"></div>
+      </div>
+    </div>
+
+    <div class="status-bar status-info show" id="applyStatus">Analyze the job first, then click Apply Smart.</div>
+
+    <div class="btn-row">
+      <button class="btn btn-apply" id="btnApply" disabled>🤖 Apply Smart</button>
+    </div>
+
+    <div style="background:#1e293b; border-radius:8px; padding:12px; border:1px solid #334155; font-size:11px; color:#64748b; line-height:1.7">
+      <strong style="color:#94a3b8">How Apply Smart works:</strong><br>
+      1. Checks match score (min 60%)<br>
+      2. Clicks Easy Apply button<br>
+      3. Fills your profile details<br>
+      4. Handles multi-step forms<br>
+      5. Submits application
+    </div>
+  </div>
+
+  <!-- HISTORY TAB -->
+  <div class="panel" id="tab-history">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px">
+      <span style="font-size:12px; color:#94a3b8; font-weight:600">Applied Jobs</span>
+      <button id="btnClearHistory" style="background:#334155; border:none; color:#94a3b8; padding:4px 10px; border-radius:6px; font-size:11px; cursor:pointer">Clear</button>
+    </div>
+    <div class="history-list" id="historyList">
+      <div class="empty-state">No applications yet.<br>Start applying to see history here.</div>
+    </div>
+  </div>
+
+  <!-- SETTINGS TAB -->
+  <div class="panel" id="tab-settings">
+    <div class="setting-group">
+      <div class="setting-label">Gemini API Key</div>
+      <input type="password" class="setting-input" id="apiKey" placeholder="AIzaSy...">
+    </div>
+
+    <div class="setting-group">
+      <div class="setting-label">Upload Resume (TXT)</div>
+      <label class="upload-btn">
+        📄 <span id="resumeLabel">Click to upload resume.txt</span>
+        <input type="file" id="resumeUpload" accept=".txt" style="display:none">
+      </label>
+    </div>
+
+    <div class="setting-group">
+      <div class="setting-label">Your Profile</div>
+      <input type="text" class="setting-input" id="pName" placeholder="Full Name" style="margin-bottom:6px">
+      <input type="email" class="setting-input" id="pEmail" placeholder="Email" style="margin-bottom:6px">
+      <input type="tel" class="setting-input" id="pPhone" placeholder="Phone (without +91)" style="margin-bottom:6px">
+      <input type="text" class="setting-input" id="pExperience" placeholder="Years of Experience" style="margin-bottom:6px">
+      <input type="text" class="setting-input" id="pCurrentSalary" placeholder="Current CTC (e.g. 900000)" style="margin-bottom:6px">
+      <input type="text" class="setting-input" id="pExpectedSalary" placeholder="Expected CTC (e.g. 1200000)" style="margin-bottom:6px">
+      <input type="text" class="setting-input" id="pNotice" placeholder="Notice Period (days)">
+    </div>
+
+    <div class="setting-group">
+      <div class="setting-label">Min Match % to Apply</div>
+      <input type="number" class="setting-input" id="minMatch" placeholder="60" min="0" max="100">
+    </div>
+
+    <button class="save-btn" id="btnSave">💾 Save Settings</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
