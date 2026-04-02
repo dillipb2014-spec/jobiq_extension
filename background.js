@@ -115,12 +115,26 @@ ${msg.jd.slice(0, 2000)}`;
 
           console.log("[JobIQ] Result:", parsed);
           chrome.storage.local.set({ lastAnalysis: parsed, lastJD: msg.jd });
-          if (tid) chrome.tabs.sendMessage(tid, { type: "SHOW_RESULT", data: parsed });
-          chrome.runtime.sendMessage({ type: "SHOW_RESULT", data: parsed });
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (!tabs[0]?.id) return;
+            chrome.tabs.sendMessage(tabs[0].id, { type: "SHOW_RESULT", data: parsed }, (res) => {
+              if (chrome.runtime.lastError) {
+                console.warn("[JobIQ] Content script not ready:", chrome.runtime.lastError.message);
+              }
+            });
+          });
+          if (tid) {
+            chrome.tabs.sendMessage(tid, { type: "SHOW_RESULT", data: parsed }, (res) => {
+              if (chrome.runtime.lastError) {
+                console.warn("[JobIQ] Tab send error:", chrome.runtime.lastError.message);
+              }
+            });
+          }
+          chrome.runtime.sendMessage({ type: "SHOW_RESULT", data: parsed }).catch(() => {});
         }).catch(e => {
           console.error("[JobIQ] Fetch error:", e.message);
-          if (tid) chrome.tabs.sendMessage(tid, { type: "ANALYSIS_ERROR", error: `AI failed: ${e.message}` });
-          chrome.runtime.sendMessage({ type: "ANALYSIS_ERROR", error: `AI failed: ${e.message}` });
+          if (tid) chrome.tabs.sendMessage(tid, { type: "ANALYSIS_ERROR", error: `AI failed: ${e.message}` }, () => { chrome.runtime.lastError; });
+          chrome.runtime.sendMessage({ type: "ANALYSIS_ERROR", error: `AI failed: ${e.message}` }).catch(() => {});
         });
       });
     });

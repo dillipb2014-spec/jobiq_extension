@@ -1,4 +1,10 @@
 // JobIQ AI - Content Script
+console.log("[JobIQ] Content script loaded. Extension ID:", chrome.runtime?.id);
+
+// Extension health check
+function isExtensionAlive() {
+  return !!chrome.runtime?.id;
+}
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let lastUrl = location.href;
@@ -141,6 +147,12 @@ function injectJobIQPanel() {
     currentJD = jd;
     setStatus("Analyzing with AI...", "#94a3b8");
 
+    // Extension health check before API call
+    if (!isExtensionAlive()) {
+      setStatus("Extension reloaded. Please refresh this page (Cmd+Shift+R).", "#f87171");
+      return;
+    }
+
     // Call Gemini directly from content script
     try {
       const stored = await new Promise(resolve => chrome.storage.local.get(["geminiApiKey", "resumeText"], resolve));
@@ -172,7 +184,12 @@ JOB: ${jd.slice(0, 1500)}`;
       chrome.storage.local.set({ lastAnalysis: result });
       showResultInPanel(result);
     } catch (e) {
-      setStatus("AI error: " + e.message, "#f87171");
+      if (e.message && e.message.includes("Extension context invalidated")) {
+        setStatus("Extension reloaded. Please refresh this page (Cmd+Shift+R).", "#f87171");
+      } else {
+        setStatus("AI error: " + e.message, "#f87171");
+      }
+      console.error("[JobIQ] Error:", e);
     }
   });
 
