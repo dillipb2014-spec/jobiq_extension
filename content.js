@@ -23,17 +23,14 @@ function extractJSON(text) {
 }
 
 // ── Resume text extraction — supports PDF, DOCX, DOC, TXT, RTF ─────────────
-async function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
-    const s = document.createElement("script");
-    s.src = src; s.onload = resolve; s.onerror = reject;
-    document.head.appendChild(s);
-  });
+async function loadScriptInContext(url) {
+  const res = await fetch(url);
+  const code = await res.text();
+  new Function(code)();
 }
 
 async function extractTextFromPDF(file) {
-  await loadScript(chrome.runtime.getURL("pdf.min.js"));
+  if (typeof pdfjsLib === "undefined") await loadScriptInContext(chrome.runtime.getURL("pdf.min.js"));
   pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdf.worker.min.js");
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
@@ -47,7 +44,7 @@ async function extractTextFromPDF(file) {
 }
 
 async function extractTextFromDOCX(file) {
-  await loadScript(chrome.runtime.getURL("mammoth.min.js"));
+  if (typeof mammoth === "undefined") await loadScriptInContext(chrome.runtime.getURL("mammoth.min.js"));
   const buf = await file.arrayBuffer();
   const result = await mammoth.extractRawText({ arrayBuffer: buf });
   return result.value.trim();
