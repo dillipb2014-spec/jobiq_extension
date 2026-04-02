@@ -140,7 +140,40 @@ function injectJobIQPanel() {
     }
     currentJD = jd;
     setStatus("Analyzing with AI...", "#94a3b8");
-    chrome.runtime.sendMessage({ type: "GET_ANALYSIS", jd });
+
+    // Call Gemini directly from content script
+    try {
+      const stored = await new Promise(resolve => chrome.storage.local.get(["geminiApiKey", "resumeText"], resolve));
+      const apiKey = stored.geminiApiKey || "AIzaSyC8n0AmvdVjZ7N0PNlVDY1f0SJV9WLyog8";
+      const resume = stored.resumeText || "Dillip Kumar Behera | Talent Acquisition | 4.6 years | Power BI, ATS, Boolean Search, Stakeholder Management, Recruitment Analytics | Juspay, Infosys, Tech Mahindra";
+
+      const prompt = `You are an ATS expert. Analyze resume vs job description.
+Return ONLY valid JSON:
+{"match":75,"missing_keywords":["kw1"],"strong_keywords":["kw2"],"improve_suggestions":["Add kw1 to skills"],"suggestions":"advice here","cover_letter":"para1\n\npara2\n\npara3"}
+
+RESUME: ${resume.slice(0, 1500)}
+JOB: ${jd.slice(0, 1500)}`;
+
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        }
+      );
+      const raw = await res.json();
+      const text = raw.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+      const clean = text.replace(/```json|```/g, "").trim();
+      let result;
+      try { result = JSON.parse(clean); }
+      catch (e) { result = { match: 0, missing_keywords: [], strong_keywords: [], improve_suggestions: [], suggestions: clean, cover_letter: "" }; }
+
+      chrome.storage.local.set({ lastAnalysis: result });
+      showResultInPanel(result);
+    } catch (e) {
+      setStatus("AI error: " + e.message, "#f87171");
+    }
   });
 
   document.getElementById("jobiq-apply").addEventListener("click", async () => {
